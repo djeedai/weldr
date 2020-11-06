@@ -1,0 +1,9 @@
+# Rust
+/target
+Cargo.lock
+
+# Local LDR files
+/data
+
+# IDEs
+/.vscode
