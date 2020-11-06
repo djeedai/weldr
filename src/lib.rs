@@ -1,3 +1,62 @@
+//! # weldr
+//!
+//! weldr is a Rust library to manipulate [LDraw](https://www.ldraw.org/) files
+//! ([format specification](https://www.ldraw.org/article/218.html)), which are files describing
+//! 3D models of [LEGO®](http://www.lego.com)* pieces.
+//!
+//! weldr allows building command-line tools and applications leveraging
+//! [the fantastic database of pieces](https://www.ldraw.org/cgi-bin/ptlist.cgi) contributed by
+//! the LDraw community.
+//!
+//! ## Example
+//!
+//! Parse a single `.ldr` line containing a [file reference command (line type 1)](https://www.ldraw.org/article/218.html#lt1):
+//!
+//! ```rust
+//! extern crate weldr;
+//!
+//! use weldr::read_lines;
+//!
+//! fn main() {}
+//!
+//! #[test]
+//! fn parse_file_ref() {
+//!   let ldr = b"1 16 0 0 0 1 0 0 0 1 0 0 0 1 s/6143.dat";
+//!   let data = read_lines(ldr);
+//!   let res = CommandType::SubFileRef(SubFileRefCmd{
+//!     color: 16,
+//!     pos: Vec3{ x: 0.0, y: 0.0, z: 0.0 },
+//!     row0: Vec3{ x: 1.0, y: 0.0, z: 0.0 },
+//!     row1: Vec3{ x: 0.0, y: 1.0, z: 0.0 },
+//!     row2: Vec3{ x: 0.0, y: 0.0, z: 1.0 },
+//!     file: "s/6143.dat"
+//!   });
+//!   assert_eq!(data, Ok((&b""[..], vec![res])));
+//! }
+//! ```
+//!
+//! The `read_lines()` function can be used to parse an entire file too.
+//!
+//! The code is available on [GitHub](https://github.com/djeedai/weldr).
+//!
+//! ## Technical features
+//!
+//! weldr leverages the [nom parser combinator library](https://crates.io/crates/nom) to efficiently
+//! and reliably parse LDraw files, and transform them into in-memory data structures for consumption.
+//! All parsing is done on `&[u8]` input expected to contain [specification](https://www.ldraw.org/article/218.html)-compliant
+//! LDraw content. In particular, this means:
+//!
+//! - UTF-8 encoded input
+//! - Both DOS/Windows `<CR><LF>` and Unix `<LF>` line termination accepted
+//!
+//! ## Copyrights
+//!
+//! The current code repository is licensed under the MIT license.
+//!
+//! LDraw™ is a trademark owned and licensed by the Estate of James Jessiman, which does not sponsor, endorse, or authorize this project.
+//!
+//! *LEGO® is a registered trademark of the LEGO Group, which does not sponsor, endorse, or authorize this project.
+
 // TEMP
 #![allow(unused_imports)]
 #![allow(dead_code)]
@@ -434,24 +493,39 @@ impl<'a> std::ops::Mul<f32> for &'a Vec3 {
   }
 }
 
+/// Line Type 1 LDraw command to reference a sub-file from the current file.
+/// 
+/// [Specification](https://www.ldraw.org/article/218.html#lt1)
 #[derive(Debug, PartialEq)]
 pub struct SubFileRefCmd<'a> {
+  /// Color code of the part.
   pub color: i32,
+  /// Position.
   pub pos: Vec3,
+  /// First row of rotation+scaling matrix part.
   pub row0: Vec3,
+  /// Second row of rotation+scaling matrix part.
   pub row1: Vec3,
+  /// Third row of rotation+scaling matrix part.
   pub row2: Vec3,
+  /// Name of referenced sub-file.
   pub file: &'a str
 }
 
-// Command types
+/// Types of commands contained in a LDraw file.
 #[derive(Debug, PartialEq)]
 pub enum CommandType<'a> {
+  /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) comment or META command.
   Command(Cmd<'a>),
+  /// [Line Type 1](https://www.ldraw.org/article/218.html#lt1) sub-file reference.
   SubFileRef(SubFileRefCmd<'a>),
+  /// [Line Type 2](https://www.ldraw.org/article/218.html#lt2) segment.
   Line(),
+  /// [Line Type 3](https://www.ldraw.org/article/218.html#lt3) triangle.
   Triangle(),
+  /// [Line Type 4](https://www.ldraw.org/article/218.html#lt4) quadrilateral.
   Quad(),
+  /// [Line Type 5](https://www.ldraw.org/article/218.html#lt5) optional line.
   OptLine()
 }
 

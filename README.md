@@ -16,6 +16,7 @@ Parse a single `.ldr` line containing a [file reference command (line type 1)](h
 
 ```rust
 extern crate weldr;
+
 use weldr::read_lines;
 
 fn main() {}
@@ -75,4 +76,4 @@ The current code repository is licensed under the MIT license.
 
 LDraw™ is a trademark owned and licensed by the Estate of James Jessiman, which does not sponsor, endorse, or authorize this project.
 
-LEGO® is a registered trademark of the LEGO Group, which does not sponsor, endorse, or authorize this project.
+*LEGO® is a registered trademark of the LEGO Group, which does not sponsor, endorse, or authorize this project.
