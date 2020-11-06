@@ -20,6 +20,7 @@ jobs:
       run: cargo test --verbose
     - name: Generate code coverage
       run: |
+        cargo install cargo-tarpaulin
         cargo tarpaulin --verbose --all-features --workspace --timeout 120 --out Xml
     - name: Upload code coverage
       uses: coverallsapp/github-action@master
