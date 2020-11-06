@@ -2,6 +2,7 @@
 
 [![LICENSE](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Crates.io Version](https://img.shields.io/crates/v/weldr.svg)](https://crates.io/crates/weldr)
+[![CI](https://github.com/djeedai/weldr/workflows/CI/badge.svg)](https://github.com/djeedai/weldr/actions?query=workflow%3ACI)
 [![Minimum rustc version](https://img.shields.io/badge/rustc-1.47.0+-lightgray.svg)](#rust-version-requirements)
 
 weldr is a Rust library to manipulate [LDraw](https://www.ldraw.org/) files ([format specification](https://www.ldraw.org/article/218.html)), which are files describing 3D models of [LEGO®](http://www.lego.com)* pieces.
