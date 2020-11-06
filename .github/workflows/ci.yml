@@ -21,8 +21,10 @@ jobs:
     - name: Generate code coverage
       run: |
         cargo install cargo-tarpaulin
-        cargo tarpaulin --verbose --all-features --workspace --timeout 120 --out Xml
+        cargo tarpaulin --verbose --all-features --workspace --timeout 120 --out Lcov
+        ls -la
     - name: Upload code coverage
       uses: coverallsapp/github-action@master
       with:
+        path-to-lcov: './'
         github-token: ${{ secrets.GITHUB_TOKEN }}
