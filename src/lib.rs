@@ -64,9 +64,12 @@
 #[macro_use]
 extern crate nom;
 
-use std::str;
-use std::str::FromStr;
-use std::str::from_utf8;
+use std::{
+  str, str::FromStr, str::from_utf8,
+  collections::HashMap,
+  rc::Rc,
+  cell::RefCell
+};
 use nom::{
   bytes::complete::{take_while1, take_until},
   character::{
@@ -133,20 +136,10 @@ fn read_cmd_id_str(input: &[u8]) -> IResult<&[u8], &[u8]> {
   terminated(take_while1(is_digit), sp)(input)
 }
 
-// fn read_cmd_id(input: &[u8]) -> IResult<&[u8], i32> {
-//   match take_while1(is_digit)(input) {
-//     Ok((output, id_s)) => {
-//       let id_str = String::from_utf8_lossy(id_s);
-//       Ok((output, id_str.parse::<i32>().unwrap()))
-//     },
-//     Err(e) => Err(e)
-//   }
-// }
-
 named!(meta_cmd<CommandType>,
   do_parse!(
     content: take_not_cr_or_lf >> (
-      CommandType::Command(Cmd{ id: 0, content: std::str::from_utf8(content).unwrap() })
+      CommandType::Command(Cmd{ id: 0, content: std::str::from_utf8(content).unwrap().to_string() })
     )
   )
 );
@@ -169,16 +162,6 @@ named!(read_vec3<Vec3>,
   )
 );
 
-//named!(color_id<i32>, parse_to!(i32));
-
-// fn parse_i32(s: &[u8]) -> i32 {
-//   FromStr::from_str(from_utf8(s).unwrap()).unwrap()
-// }
-
-// named!(color_id<i32>,
-//   map!(digit1, parse_i32)
-// );
-
 named!(color_id<i32>,
   map_res!(
     map_res!(digit1, str::from_utf8),
@@ -186,41 +169,10 @@ named!(color_id<i32>,
   )
 );
 
-// named!(filename<&str>,
-//   let s = match map!(take_while1!(is_digit), str::from_utf8) {
-//     Ok(v) => v,
-//     Err(e) => e
-//   }
-// );
-
-// fn filename(input: &[u8]) -> IResult<&[u8], &str> {
-//   let s = match str::from_utf8(input) {
-//     Ok(v) => Ok(input, v),
-//     Err(e) => Err(e)
-//   };
-//   s
-// }
-
-// fn filename(input: &[u8]) -> IResult<&[u8], &'static str> {
-//   Ok((input, "testssxxxx"))
-// }
-
-// fn take_filename_char(input: &[u8]) -> IResult<&[u8], char> {
-//   if input.is_empty() {
-//     Err()
-//   } else {
-//     Ok((input, input[0]))
-//   }
-// }
-
 #[inline]
 fn is_filename_char(chr: u8) -> bool {
   is_alphanumeric(chr) || chr == b'/' || chr == b'\\' || chr == b'.' || chr == b'-'
 }
-
-// named!(filename_char,
-//   take_while1!(is_filename_char)
-// );
 
 use nom::InputTakeAtPosition;
 use nom::error::ErrorKind;
@@ -256,27 +208,43 @@ do_parse!(
       row0: row0,
       row1: row1,
       row2: row2,
-      file: file
+      file: SubFileRef::UnresolvedRef(file.to_string())
     })
   )
 )
 );
 
-fn line_cmd(input: &[u8]) -> IResult<&[u8], CommandType> {
-  Ok((input, CommandType::Command(Cmd{ id: 0, content: &"" })))
-}
+named!(line_cmd<CommandType>,
+  do_parse!(
+    content: take_not_cr_or_lf >> (
+      CommandType::Command(Cmd{ id: 2, content: std::str::from_utf8(content).unwrap().to_string() })
+    )
+  )
+);
 
-fn tri_cmd(input: &[u8]) -> IResult<&[u8], CommandType> {
-  Ok((input, CommandType::Command(Cmd{ id: 0, content: &"" })))
-}
+named!(tri_cmd<CommandType>,
+  do_parse!(
+    content: take_not_cr_or_lf >> (
+      CommandType::Command(Cmd{ id: 3, content: std::str::from_utf8(content).unwrap().to_string() })
+    )
+  )
+);
 
-fn quad_cmd(input: &[u8]) -> IResult<&[u8], CommandType> {
-  Ok((input, CommandType::Command(Cmd{ id: 0, content: &"" })))
-}
+named!(quad_cmd<CommandType>,
+  do_parse!(
+    content: take_not_cr_or_lf >> (
+      CommandType::Command(Cmd{ id: 4, content: std::str::from_utf8(content).unwrap().to_string() })
+    )
+  )
+);
 
-fn opt_line_cmd(input: &[u8]) -> IResult<&[u8], CommandType> {
-  Ok((input, CommandType::Command(Cmd{ id: 0, content: &"" })))
-}
+named!(opt_line_cmd<CommandType>,
+  do_parse!(
+    content: take_not_cr_or_lf >> (
+      CommandType::Command(Cmd{ id: 5, content: std::str::from_utf8(content).unwrap().to_string() })
+    )
+  )
+);
 
 // Zero or more "spaces", as defined in LDraw standard.
 // Valid even on empty input.
@@ -326,11 +294,141 @@ named!(pub read_lines<Vec<CommandType>>,
   many0!(read_line)
 );
 
+struct QueuedFileRef {
+  /// Filename of unresolved source file.
+  filename: String,
+  /// Referer source file which requested the resolution.
+  referer: Rc<RefCell<SourceFile>>
+}
+
+use std::collections::HashSet;
+
+struct ResolveQueue {
+  /// Queue of pending items to resolve and load.
+  queue: Vec<QueuedFileRef>,
+  /// Number of pending items in the queue for each filename.
+  pending_count: HashMap<String, u32>
+}
+
+impl ResolveQueue {
+  fn new() -> ResolveQueue {
+    return ResolveQueue{ queue: vec![], pending_count: HashMap::new() }
+  }
+
+  fn push(&mut self, filename: &str, referer_filename: &str, referer: Rc<RefCell<SourceFile>>) {
+    if let Some(num_pending) = self.pending_count.get_mut(referer_filename) {
+      assert!(*num_pending > 0); // should not make it to the queue if already resolved
+      *num_pending += 1;
+    } else {
+      self.pending_count.insert(referer_filename.to_string(), 1);
+    }
+    self.queue.push(QueuedFileRef{ filename: filename.to_string(), referer });
+  }
+
+  fn pop(&mut self) -> Option<(QueuedFileRef, u32)> {
+    match self.queue.pop() {
+      Some(qfr) => {
+        let num_pending = self.pending_count.get_mut(&qfr.referer.borrow().filename).unwrap();
+        *num_pending -= 1;
+        Some((qfr, *num_pending))
+      },
+      None => None
+    }
+  }
+
+  fn reset(&mut self) {
+    self.queue.clear();
+    self.pending_count.clear();
+  }
+}
+
+fn resolve_file_refs(source_file: Rc<RefCell<SourceFile>>, queue: &mut ResolveQueue, source_map: &mut HashMap<String, Rc<RefCell<SourceFile>>>) {
+  let referer_filename = source_file.borrow().filename.clone();
+  let mut subfile_set = HashSet::new();
+  for cmd in &mut source_file.borrow_mut().cmds {
+    if let CommandType::SubFileRef(sfr_cmd) = cmd {
+      // All subfile refs come out of read_lines() as unresolved by definition,
+      // since read_lines() doesn't have access to the source map nor the resolver.
+      // See if we can resolve some of them now.
+      if let SubFileRef::UnresolvedRef(subfilename) = &sfr_cmd.file {
+        // Check the source map
+        let subfilename = subfilename.to_string();
+        if let Some(existing_source_file) = source_map.get(&subfilename) {
+          // If already parsed, reuse
+          println!("Updating resolved subfile ref in {} -> {}", referer_filename, subfilename);
+          sfr_cmd.file = SubFileRef::ResolvedRef(Rc::clone(existing_source_file));
+        } else if subfile_set.contains(&subfilename) {
+          println!("Ignoring already-queued unresolved subfile ref in {} -> {}", referer_filename, subfilename);
+        } else {
+          // If not, push to queue for later parsing, but only once
+          println!("Queuing unresolved subfile ref in {} -> {}", referer_filename, subfilename);
+          queue.push(&subfilename[..], &referer_filename[..], source_file.clone());
+          subfile_set.insert(subfilename);
+        }
+      }
+    }
+  }
+}
+
+fn load_and_parse_single_file(filename: &str, resolver: &dyn FileRefResolver) -> SourceFile {
+  //match resolver.resolve(filename) {}
+  let raw_content = resolver.resolve(filename);
+  let mut source_file = SourceFile{
+    filename: filename.to_string(),
+    raw_content,
+    cmds: Vec::new()
+  };
+  match read_lines(&source_file.raw_content[..]) {
+    Ok((_, cmds)) => {
+      source_file.cmds = cmds;
+      source_file
+    },
+    Err(_) => panic!("TODO : handle parsing error")
+  }
+}
+
+pub fn parse(filename: &str, resolver: &dyn FileRefResolver, source_map: &mut HashMap<String, Rc<RefCell<SourceFile>>>) -> Rc<RefCell<SourceFile>> {
+  if let Some(existing_file) = source_map.get(filename) {
+    return Rc::clone(existing_file);
+  }
+  let mut queue = ResolveQueue::new();
+  println!("Loading root file: {}", filename);
+  let root_file = load_and_parse_single_file(filename, resolver);
+  let root_file = Rc::new(RefCell::new(root_file));
+  {
+    println!("Post-loading resolving subfile refs of root file: {}", filename);
+    resolve_file_refs(Rc::clone(&root_file), &mut queue, source_map);
+  }
+  source_map.insert(filename.to_string(), Rc::clone(&root_file));
+  while let Some(queued_file) = queue.pop() {
+    let num_pending_left = queued_file.1;
+    let filename = &queued_file.0.filename;
+    println!("Dequeuing sub-file: {}", filename);
+    if source_map.contains_key(filename) {
+      println!("Already parsed; reusing sub-file: {}", filename);
+    } else {
+      println!("Not yet parsed; parsing sub-file: {}", filename);
+      let source_file = load_and_parse_single_file(&filename[..], resolver);
+      let subfile = Rc::new(RefCell::new(source_file));
+      println!("Post-loading resolving subfile refs of sub-file: {}", filename);
+      resolve_file_refs(Rc::clone(&subfile), &mut queue, source_map);
+      source_map.insert(filename.clone(), Rc::clone(&subfile));
+    }
+    // Re-resolve the source file that triggered this sub-file loading to update its subfile refs
+    // if there is no more sub-file references enqueued.
+    if num_pending_left == 0 {
+      println!("Re-resolving referer file on last resolved ref: {}", queued_file.0.referer.borrow().filename);
+      resolve_file_refs(queued_file.0.referer, &mut queue, source_map);
+    }
+  }
+  root_file
+}
+
 
 #[derive(Debug, PartialEq)]
-pub struct Cmd<'a> {
+pub struct Cmd {
   id: i32,
-  content: &'a str
+  content: String
 }
 
 #[derive(Debug, PartialEq)]
@@ -493,11 +591,24 @@ impl<'a> std::ops::Mul<f32> for &'a Vec3 {
   }
 }
 
+#[derive(Debug, PartialEq)]
+pub struct SourceFile {
+  pub filename: String,
+  pub raw_content: Vec<u8>,
+  pub cmds: Vec<CommandType>
+}
+
+#[derive(Debug, PartialEq)]
+pub enum SubFileRef {
+  ResolvedRef(Rc<RefCell<SourceFile>>),
+  UnresolvedRef(String)
+}
+
 /// Line Type 1 LDraw command to reference a sub-file from the current file.
 /// 
 /// [Specification](https://www.ldraw.org/article/218.html#lt1)
 #[derive(Debug, PartialEq)]
-pub struct SubFileRefCmd<'a> {
+pub struct SubFileRefCmd {
   /// Color code of the part.
   pub color: i32,
   /// Position.
@@ -508,17 +619,17 @@ pub struct SubFileRefCmd<'a> {
   pub row1: Vec3,
   /// Third row of rotation+scaling matrix part.
   pub row2: Vec3,
-  /// Name of referenced sub-file.
-  pub file: &'a str
+  /// Referenced sub-file.
+  pub file: SubFileRef
 }
 
 /// Types of commands contained in a LDraw file.
 #[derive(Debug, PartialEq)]
-pub enum CommandType<'a> {
+pub enum CommandType {
   /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) comment or META command.
-  Command(Cmd<'a>),
+  Command(Cmd),
   /// [Line Type 1](https://www.ldraw.org/article/218.html#lt1) sub-file reference.
-  SubFileRef(SubFileRefCmd<'a>),
+  SubFileRef(SubFileRefCmd),
   /// [Line Type 2](https://www.ldraw.org/article/218.html#lt2) segment.
   Line(),
   /// [Line Type 3](https://www.ldraw.org/article/218.html#lt3) triangle.
@@ -531,8 +642,8 @@ pub enum CommandType<'a> {
 
 /// Resolver trait for file references.
 pub trait FileRefResolver {
-  /// Resolve the given file ref name and return the content of the file.
-  fn resolve(&self, name: &str) -> &[u8];
+  /// Resolve the given file reference filename and return the content of the file.
+  fn resolve(&self, filename: &str) -> Vec<u8>;
 }
 
 #[cfg(test)]
@@ -594,7 +705,7 @@ mod tests {
 
   #[test]
   fn test_meta_cmd() {
-    let res = CommandType::Command(Cmd{ id: 0, content: &"test of metacommand" });
+    let res = CommandType::Command(Cmd{ id: 0, content: "test of metacommand".to_string() });
     assert_eq!(meta_cmd(b"test of metacommand"), Ok((&b""[..], res)));
   }
 
@@ -606,7 +717,7 @@ mod tests {
       row0: Vec3{ x: 1.0, y: 0.0, z: 0.0 },
       row1: Vec3{ x: 0.0, y: 1.0, z: 0.0 },
       row2: Vec3{ x: 0.0, y: 0.0, z: 1.0 },
-      file: "aaaaaaddd"
+      file: SubFileRef::UnresolvedRef("aaaaaaddd".to_string())
     });
     assert_eq!(file_ref_cmd(b"16 0 0 0 1 0 0 0 1 0 0 0 1 aaaaaaddd"), Ok((&b""[..], res)));
   }
@@ -651,7 +762,7 @@ mod tests {
 
   #[test]
   fn test_read_line_cmd() {
-    let res = CommandType::Command(Cmd{ id: 0, content: &"this doesn't matter" });
+    let res = CommandType::Command(Cmd{ id: 0, content: "this doesn't matter".to_string() });
     assert_eq!(read_line(b"0 this doesn't matter"), Ok((&b""[..], res)));
   }
 
@@ -663,32 +774,32 @@ mod tests {
       row0: Vec3{ x: 1.0, y: 0.0, z: 0.0 },
       row1: Vec3{ x: 0.0, y: 1.0, z: 0.0 },
       row2: Vec3{ x: 0.0, y: 0.0, z: 1.0 },
-      file: "aa/aaaaddd"
+      file: SubFileRef::UnresolvedRef("aa/aaaaddd".to_string())
     });
     assert_eq!(read_line(b"1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd"), Ok((&b""[..], res)));
   }
 
   #[test]
   fn test_read_lines() {
-    let cmd0 = CommandType::Command(Cmd{ id: 0, content: &"this doesn't matter" });
+    let cmd0 = CommandType::Command(Cmd{ id: 0, content: "this doesn't matter".to_string() });
     let cmd1 = CommandType::SubFileRef(SubFileRefCmd{
       color: 16,
       pos: Vec3{ x: 0.0, y: 0.0, z: 0.0 },
       row0: Vec3{ x: 1.0, y: 0.0, z: 0.0 },
       row1: Vec3{ x: 0.0, y: 1.0, z: 0.0 },
       row2: Vec3{ x: 0.0, y: 0.0, z: 1.0 },
-      file: "aa/aaaaddd"
+      file: SubFileRef::UnresolvedRef("aa/aaaaddd".to_string())
     });
     assert_eq!(read_lines(b"\n0 this doesn't matter\n\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd"), Ok((&b""[..], vec![cmd0, cmd1])));
     
-    let cmd0 = CommandType::Command(Cmd{ id: 0, content: &"this doesn't \"matter\"" });
+    let cmd0 = CommandType::Command(Cmd{ id: 0, content: "this doesn't \"matter\"".to_string() });
     let cmd1 = CommandType::SubFileRef(SubFileRefCmd{
       color: 16,
       pos: Vec3{ x: 0.0, y: 0.0, z: 0.0 },
       row0: Vec3{ x: 1.0, y: 0.0, z: 0.0 },
       row1: Vec3{ x: 0.0, y: 1.0, z: 0.0 },
       row2: Vec3{ x: 0.0, y: 0.0, z: 1.0 },
-      file: "aa/aaaaddd"
+      file: SubFileRef::UnresolvedRef("aa/aaaaddd".to_string())
     });
     assert_eq!(read_lines(b"\r\n0 this doesn't \"matter\"\r\n\r\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd\n"), Ok((&b""[..], vec![cmd0, cmd1])));
 
@@ -698,7 +809,7 @@ mod tests {
       row0: Vec3{ x: 1.0, y: 0.0, z: 0.0 },
       row1: Vec3{ x: 0.0, y: 1.0, z: 0.0 },
       row2: Vec3{ x: 0.0, y: 0.0, z: 1.0 },
-      file: "aa/aaaaddd"
+      file: SubFileRef::UnresolvedRef("aa/aaaaddd".to_string())
     });
     let cmd1 = CommandType::SubFileRef(SubFileRefCmd{
       color: 16,
@@ -706,7 +817,7 @@ mod tests {
       row0: Vec3{ x: 1.0, y: 0.0, z: 0.0 },
       row1: Vec3{ x: 0.0, y: 1.0, z: 0.0 },
       row2: Vec3{ x: 0.0, y: 0.0, z: 1.0 },
-      file: "aa/aaaaddd"
+      file: SubFileRef::UnresolvedRef("aa/aaaaddd".to_string())
     });
     assert_eq!(read_lines(b"1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd"), Ok((&b""[..], vec![cmd0, cmd1])));
   }
