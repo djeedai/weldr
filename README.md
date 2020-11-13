@@ -2,7 +2,7 @@
 
 [![LICENSE](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Crates.io Version](https://img.shields.io/crates/v/weldr.svg)](https://crates.io/crates/weldr)
-[![CI](https://github.com/djeedai/weldr/workflows/CI/badge.svg)](https://github.com/djeedai/weldr/actions?query=workflow%3ACI)
+[![CI](https://github.com/djeedai/weldr/workflows/CI/badge.svg?branch=main)](https://github.com/djeedai/weldr/actions?query=workflow%3ACI)
 [![Coverage Status](https://coveralls.io/repos/github/djeedai/weldr/badge.svg?branch=main)](https://coveralls.io/github/djeedai/weldr?branch=main)
 [![Minimum rustc version](https://img.shields.io/badge/rustc-1.47.0+-lightgray.svg)](#rust-version-requirements)
 
