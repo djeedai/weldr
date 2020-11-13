@@ -199,9 +199,9 @@ do_parse!(
   sp >>
   pos: read_vec3 >>
   sp >>
-  row0: read_vec3 >> 
+  row0: read_vec3 >>
   sp >>
-  row1: read_vec3 >> 
+  row1: read_vec3 >>
   sp >>
   row2: read_vec3 >>
   sp >>
@@ -220,32 +220,71 @@ do_parse!(
 
 named!(line_cmd<CommandType>,
   do_parse!(
-    content: take_not_cr_or_lf >> (
-      CommandType::Command(Cmd{ id: 2, content: std::str::from_utf8(content).unwrap().to_string() })
+    color: color_id >>
+    sp >>
+    v1: read_vec3 >>
+    sp >>
+    v2: read_vec3 >> (
+      CommandType::Line(LineCmd{
+        color: color,
+        vertices: [v1, v2]
+      })
     )
   )
 );
 
 named!(tri_cmd<CommandType>,
   do_parse!(
-    content: take_not_cr_or_lf >> (
-      CommandType::Command(Cmd{ id: 3, content: std::str::from_utf8(content).unwrap().to_string() })
+    color: color_id >>
+    sp >>
+    v1: read_vec3 >>
+    sp >>
+    v2: read_vec3 >>
+    sp >>
+    v3: read_vec3 >> (
+      CommandType::Triangle(TriangleCmd{
+        color: color,
+        vertices: [v1, v2, v3]
+      })
     )
   )
 );
 
 named!(quad_cmd<CommandType>,
   do_parse!(
-    content: take_not_cr_or_lf >> (
-      CommandType::Command(Cmd{ id: 4, content: std::str::from_utf8(content).unwrap().to_string() })
+    color: color_id >>
+    sp >>
+    v1: read_vec3 >>
+    sp >>
+    v2: read_vec3 >>
+    sp >>
+    v3: read_vec3 >>
+    sp >>
+    v4: read_vec3 >> (
+      CommandType::Quad(QuadCmd{
+        color: color,
+        vertices: [v1, v2, v3, v4]
+      })
     )
   )
 );
 
 named!(opt_line_cmd<CommandType>,
   do_parse!(
-    content: take_not_cr_or_lf >> (
-      CommandType::Command(Cmd{ id: 5, content: std::str::from_utf8(content).unwrap().to_string() })
+    color: color_id >>
+    sp >>
+    v1: read_vec3 >>
+    sp >>
+    v2: read_vec3 >>
+    sp >>
+    v3: read_vec3 >>
+    sp >>
+    v4: read_vec3 >> (
+      CommandType::OptLine(OptLineCmd{
+        color: color,
+        vertices: [v1, v2],
+        control_points: [v3, v4]
+      })
     )
   )
 );
@@ -472,6 +511,53 @@ pub struct SubFileRefCmd {
   pub file: SubFileRef
 }
 
+/// Line Type 2 LDraw command to draw a segment between 2 vertices.
+/// 
+/// [Specification](https://www.ldraw.org/article/218.html#lt2)
+#[derive(Debug, PartialEq)]
+pub struct LineCmd {
+  /// Color code of the primitive.
+  pub color: i32,
+  /// Vertices of the segment.
+  pub vertices: [Vec3; 2]
+}
+
+/// Line Type 3 LDraw command to draw a triangle between 3 vertices.
+/// 
+/// [Specification](https://www.ldraw.org/article/218.html#lt3)
+#[derive(Debug, PartialEq)]
+pub struct TriangleCmd {
+  /// Color code of the primitive.
+  pub color: i32,
+  /// Vertices of the triangle.
+  pub vertices: [Vec3; 3]
+}
+
+/// Line Type 4 LDraw command to draw a quad between 4 vertices.
+/// 
+/// [Specification](https://www.ldraw.org/article/218.html#lt4)
+#[derive(Debug, PartialEq)]
+pub struct QuadCmd {
+  /// Color code of the primitive.
+  pub color: i32,
+  /// Vertices of the quad.
+  pub vertices: [Vec3; 4]
+}
+
+/// Line Type 5 LDraw command to draw an optional segment between two vertices,
+/// aided by 2 control points.
+/// 
+/// [Specification](https://www.ldraw.org/article/218.html#lt5)
+#[derive(Debug, PartialEq)]
+pub struct OptLineCmd {
+  /// Color code of the primitive.
+  pub color: i32,
+  /// Vertices of the segment.
+  pub vertices: [Vec3; 2],
+  /// Control points of the segment.
+  pub control_points: [Vec3; 2]
+}
+
 /// Types of commands contained in a LDraw file.
 #[derive(Debug, PartialEq)]
 pub enum CommandType {
@@ -480,13 +566,13 @@ pub enum CommandType {
   /// [Line Type 1](https://www.ldraw.org/article/218.html#lt1) sub-file reference.
   SubFileRef(SubFileRefCmd),
   /// [Line Type 2](https://www.ldraw.org/article/218.html#lt2) segment.
-  Line(),
+  Line(LineCmd),
   /// [Line Type 3](https://www.ldraw.org/article/218.html#lt3) triangle.
-  Triangle(),
+  Triangle(TriangleCmd),
   /// [Line Type 4](https://www.ldraw.org/article/218.html#lt4) quadrilateral.
-  Quad(),
+  Quad(QuadCmd),
   /// [Line Type 5](https://www.ldraw.org/article/218.html#lt5) optional line.
-  OptLine()
+  OptLine(OptLineCmd)
 }
 
 /// Resolver trait for file references.
@@ -610,9 +696,51 @@ mod tests {
   }
 
   #[test]
-  fn test_read_line_cmd() {
+  fn test_read_cmd() {
     let res = CommandType::Command(Cmd{ id: 0, content: "this doesn't matter".to_string() });
     assert_eq!(read_line(b"0 this doesn't matter"), Ok((&b""[..], res)));
+  }
+
+  #[test]
+  fn test_read_line_cmd() {
+    let res = CommandType::Line(LineCmd{ color: 16, vertices: [
+      Vec3{ x: 1.0, y: 1.0, z: 0.0 },
+      Vec3{ x: 0.9239, y: 1.0, z: 0.3827 }
+    ] });
+    assert_eq!(read_line(b"2 16 1 1 0 0.9239 1 0.3827"), Ok((&b""[..], res)));
+  }
+
+  #[test]
+  fn test_read_tri_cmd() {
+    let res = CommandType::Triangle(TriangleCmd{ color: 16, vertices: [
+      Vec3{ x: 1.0, y: 1.0, z: 0.0 },
+      Vec3{ x: 0.9239, y: 1.0, z: 0.3827 },
+      Vec3{ x: 0.9239, y: 0.0, z: 0.3827 }
+    ] });
+    assert_eq!(read_line(b"3 16 1 1 0 0.9239 1 0.3827 0.9239 0 0.3827"), Ok((&b""[..], res)));
+  }
+
+  #[test]
+  fn test_read_quad_cmd() {
+    let res = CommandType::Quad(QuadCmd{ color: 16, vertices: [
+      Vec3{ x: 1.0, y: 1.0, z: 0.0 },
+      Vec3{ x: 0.9239, y: 1.0, z: 0.3827 },
+      Vec3{ x: 0.9239, y: 0.0, z: 0.3827 },
+      Vec3{ x: 1.0, y: 0.0, z: 0.0 }
+    ] });
+    assert_eq!(read_line(b"4 16 1 1 0 0.9239 1 0.3827 0.9239 0 0.3827 1 0 0"), Ok((&b""[..], res)));
+  }
+
+  #[test]
+  fn test_read_opt_line_cmd() {
+    let res = CommandType::OptLine(OptLineCmd{ color: 16, vertices: [
+      Vec3{ x: 1.0, y: 1.0, z: 0.0 },
+      Vec3{ x: 0.9239, y: 1.0, z: 0.3827 }
+    ], control_points: [
+      Vec3{ x: 0.9239, y: 0.0, z: 0.3827 },
+      Vec3{ x: 1.0, y: 0.0, z: 0.0 }
+    ] });
+    assert_eq!(read_line(b"5 16 1 1 0 0.9239 1 0.3827 0.9239 0 0.3827 1 0 0"), Ok((&b""[..], res)));
   }
 
   #[test]
