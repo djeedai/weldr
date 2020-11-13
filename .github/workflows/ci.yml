@@ -14,6 +14,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
+    - name: Install gcc-multilib
+      run: sudo apt-get install gcc-multilib
+    - name: Clean
+      run: cargo clean
     - name: Build
       run: cargo build --verbose
     - name: Run tests
