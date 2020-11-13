@@ -59,7 +59,6 @@ weldr = "0.1"
 Then include it in your code like this:
 
 ```rust,ignore
-#[macro_use]
 extern crate weldr;
 ```
 
