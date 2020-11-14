@@ -89,18 +89,6 @@ use math::Vec3;
 // LDraw File Format Specification
 // https://www.ldraw.org/article/218.html
 
-fn alpha(s: &[u8]) -> IResult<&[u8], &[u8]> {
-  take_while1(is_alphabetic)(s)
-}
-
-fn alphanum(s: &[u8]) -> IResult<&[u8], &[u8]> {
-  take_while1(is_alphanumeric)(s)
-}
-
-fn cmd_id(s: &[u8]) -> IResult<&[u8], &[u8]> {
-  take_while1(is_digit)(s)
-}
-
 // "Whitespace is defined as one or more spaces (#32), tabs (#9), or combination thereof."
 fn is_space(chr: u8) -> bool {
   chr == b'\t' || chr == b' '
