@@ -17,10 +17,8 @@ jobs:
       matrix:
         rust:
           - stable
-          #- beta
-          #- nightly
+          - beta
           - 1.44.0
-          - 1.47.0
 
         features:
           - '--no-default-features'
