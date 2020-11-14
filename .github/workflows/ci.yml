@@ -24,7 +24,7 @@ jobs:
       run: cargo test --verbose
     - name: Install cargo-tarpaulin
       run: |
-        RUST_BACKTRACE=1 cargo install cargo-tarpaulin
+        RUST_BACKTRACE=1 cargo install --version 0.16.0 cargo-tarpaulin
     - name: Generate code coverage
       run: |
         RUST_BACKTRACE=1 cargo tarpaulin --verbose --all-features --workspace --timeout 120 --out Lcov
