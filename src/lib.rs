@@ -64,6 +64,9 @@
 #[macro_use]
 extern crate nom;
 
+#[cfg(feature = "cgmath")]
+extern crate cgmath;
+
 use std::{
   str, str::FromStr, str::from_utf8,
   collections::HashMap,
@@ -82,9 +85,14 @@ use nom::{
   IResult,
 };
 
+#[cfg(not(feature = "cgmath"))]
 mod math;
 
+#[cfg(not(feature = "cgmath"))]
 use math::Vec3;
+
+#[cfg(feature = "cgmath")]
+type Vec3 = cgmath::Vector3<f32>;
 
 // LDraw File Format Specification
 // https://www.ldraw.org/article/218.html

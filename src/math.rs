@@ -1,3 +1,4 @@
+#![cfg(not(feature = "cgmath"))]
 
 /// Generic 3-component vector.
 #[derive(Debug, Copy, Clone, PartialEq)]
