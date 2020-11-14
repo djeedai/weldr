@@ -12,19 +12,44 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        rust:
+          - stable
+          - beta
+          - 1.44.0
+
+        features:
+          - '--no-default-features'
+          - '--features "cgmath"'
+
     steps:
-    - uses: actions/checkout@v2
+    - name: Checkout
+      uses: actions/checkout@v2
+
+    - name: Install rust (${{ matrix.rust }})
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: ${{ matrix.rust }}
+        profile: minimal
+        override: true
+
     - name: Build
-      run: cargo build --verbose
+      run: cargo build --verbose ${{ matrix.features }}
+
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --verbose ${{ matrix.features }}
+
     - name: Install cargo-tarpaulin
       run: |
         RUST_BACKTRACE=1 cargo install --version 0.16.0 cargo-tarpaulin
+
     - name: Generate code coverage
       run: |
         RUST_BACKTRACE=1 cargo tarpaulin --verbose --all-features --workspace --timeout 120 --out Lcov
         ls -la
+
     - name: Upload code coverage
       uses: coverallsapp/github-action@master
       with:
