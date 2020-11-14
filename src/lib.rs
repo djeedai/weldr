@@ -131,7 +131,7 @@ fn read_cmd_id_str(input: &[u8]) -> IResult<&[u8], &[u8]> {
 named!(meta_cmd<CommandType>,
   do_parse!(
     content: take_not_cr_or_lf >> (
-      CommandType::Command(Cmd{ id: 0, content: std::str::from_utf8(content).unwrap().to_string() })
+      CommandType::Command(Cmd{ content: std::str::from_utf8(content).unwrap().to_string() })
     )
   )
 );
@@ -418,6 +418,32 @@ fn load_and_parse_single_file(filename: &str, resolver: &dyn FileRefResolver) ->
   }
 }
 
+/// Parse a single file using the given resolver and source map.
+///
+/// Attempt to load the content of `filename` via the given `resolver`, and parse it.
+/// Then recursiverly look for sub-file commands inside that root file, and try to resolve
+/// the content of those sub-files and parse them too. All the loaded and parsed files end
+/// up populating the given `source_map`, which can be pre-populated manually or from a
+/// previous call with already loaded and parsed files.
+/// ```rust
+/// use weldr::{ FileRefResolver, parse };
+/// use std::collections::HashMap;
+/// 
+/// struct MyCustomResolver {};
+/// 
+/// impl FileRefResolver for MyCustomResolver {
+///   fn resolve(&self, filename: &str) -> Vec<u8> {
+///     vec![] // replace with custom impl
+///   }
+/// }
+/// 
+/// fn main() {
+///   let resolver = MyCustomResolver{};
+///   let mut source_map = HashMap::new();
+///   let root_file = parse("root.ldr", &resolver, &mut source_map);
+///   assert_eq!(root_file.borrow().filename, "root.ldr");
+/// }
+/// ```
 pub fn parse(filename: &str, resolver: &dyn FileRefResolver, source_map: &mut HashMap<String, Rc<RefCell<SourceFile>>>) -> Rc<RefCell<SourceFile>> {
   if let Some(existing_file) = source_map.get(filename) {
     return Rc::clone(existing_file);
@@ -455,22 +481,32 @@ pub fn parse(filename: &str, resolver: &dyn FileRefResolver, source_map: &mut Ha
   root_file
 }
 
-
+/// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) comment or META command,
+/// when not otherwise interpreted as a meta-command.
 #[derive(Debug, PartialEq)]
 pub struct Cmd {
-  id: i32,
+  /// Verbatim content of the command, excluding the initial `0` identifier.
   content: String
 }
 
+/// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) comment.
 #[derive(Debug, PartialEq)]
 pub struct Comment {
-  text: str
+  /// Comment content, excluding the command identififer `0` and the optional comment
+  /// marker `//`.
+  text: String
 }
 
+/// Single LDraw source file loaded and optionally parsed.
 #[derive(Debug, PartialEq)]
 pub struct SourceFile {
+  /// The relative filename of the file as resolved.
   pub filename: String,
+  /// Raw UTF-8 file content (without BOM) loaded from the resolved file. Line ending can be
+  /// Unix style `\n` or Windows style `\r\n`. As a convenience, parsing handles both indifferently,
+  /// so the file can contain a mix of both, although this is not recommended.
   pub raw_content: Vec<u8>,
+  /// LDraw commands parsed from the raw text content of the file.
   pub cmds: Vec<CommandType>
 }
 
@@ -563,9 +599,22 @@ pub enum CommandType {
   OptLine(OptLineCmd)
 }
 
-/// Resolver trait for file references.
+/// Resolver trait for sub-file references ([Line Type 1](https://www.ldraw.org/article/218.html#lt1) LDraw command).
+/// 
+/// An implementation of this trait must be passed to [`parse()`](weldr::parse) to allow resolving sub-file
+/// references recursively, and parsing all dependent sub-files of the top-level file being parsed. Implementations
+/// are free to decide how to retrieve the file, but must ensure that all canonical paths are in scope, as sub-file
+/// references can be relative to any of those:
+/// - `/p/`       - Parts primitives
+/// - `/p/48/`    - High-resolution primitives
+/// - `/parts/`   - Main catalog of parts
+/// - `/parts/s/` - Catalog of sub-parts commonly used
 pub trait FileRefResolver {
-  /// Resolve the given file reference filename and return the content of the file.
+  /// Resolve the given file reference `filename`, given as it appears in a sub-file reference, and return
+  /// the content of the file as a UTF-8 encoded buffer of bytes, without BOM. Line ending can be indifferently
+  /// Unix style `\n` or Windows style `\r\n`.
+  /// 
+  /// See [`parse()`](weldr::parse) for usage.
   fn resolve(&self, filename: &str) -> Vec<u8>;
 }
 
@@ -628,7 +677,7 @@ mod tests {
 
   #[test]
   fn test_meta_cmd() {
-    let res = CommandType::Command(Cmd{ id: 0, content: "test of metacommand".to_string() });
+    let res = CommandType::Command(Cmd{ content: "test of metacommand".to_string() });
     assert_eq!(meta_cmd(b"test of metacommand"), Ok((&b""[..], res)));
   }
 
@@ -685,7 +734,7 @@ mod tests {
 
   #[test]
   fn test_read_cmd() {
-    let res = CommandType::Command(Cmd{ id: 0, content: "this doesn't matter".to_string() });
+    let res = CommandType::Command(Cmd{ content: "this doesn't matter".to_string() });
     assert_eq!(read_line(b"0 this doesn't matter"), Ok((&b""[..], res)));
   }
 
@@ -746,7 +795,7 @@ mod tests {
 
   #[test]
   fn test_read_lines() {
-    let cmd0 = CommandType::Command(Cmd{ id: 0, content: "this doesn't matter".to_string() });
+    let cmd0 = CommandType::Command(Cmd{ content: "this doesn't matter".to_string() });
     let cmd1 = CommandType::SubFileRef(SubFileRefCmd{
       color: 16,
       pos: Vec3{ x: 0.0, y: 0.0, z: 0.0 },
@@ -757,7 +806,7 @@ mod tests {
     });
     assert_eq!(read_lines(b"\n0 this doesn't matter\n\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd"), Ok((&b""[..], vec![cmd0, cmd1])));
     
-    let cmd0 = CommandType::Command(Cmd{ id: 0, content: "this doesn't \"matter\"".to_string() });
+    let cmd0 = CommandType::Command(Cmd{ content: "this doesn't \"matter\"".to_string() });
     let cmd1 = CommandType::SubFileRef(SubFileRefCmd{
       color: 16,
       pos: Vec3{ x: 0.0, y: 0.0, z: 0.0 },
