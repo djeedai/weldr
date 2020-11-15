@@ -76,20 +76,24 @@ extern crate nom;
 extern crate cgmath;
 
 use std::{
-  str, str::FromStr, str::from_utf8,
-  collections::HashMap,
+  str::{self, FromStr, from_utf8},
+  collections::{HashMap, HashSet},
+  num::ParseIntError,
   rc::Rc,
   cell::RefCell
 };
 use nom::{
-  bytes::complete::{take_while1, take_until},
+  bytes::complete::{tag, take_while1, take_while_m_n, take_until},
   character::{
     is_alphabetic, is_alphanumeric, is_digit,
     complete::{alphanumeric1 as alphanumeric, line_ending as eol, digit1},
   },
-  number::complete::float,
+  combinator::map_res,
+  error::ErrorKind,
   multi::many0,
-  sequence::terminated,
+  number::complete::float,
+  sequence::{terminated, tuple},
+  InputTakeAtPosition,
   IResult,
 };
 
@@ -160,6 +164,11 @@ fn take_not_comma_or_eol(input: &[u8]) -> IResult<&[u8], &[u8]> {
   input.split_at_position_complete(|item| item == b',' || is_cr_or_lf(item))
 }
 
+// Parse any character which is not a space, potentially until the end of input.
+fn take_not_space(input: &[u8]) -> IResult<&[u8], &[u8]> {
+  input.split_at_position_complete(|item| is_space(item))
+}
+
 // Read the command ID and swallow the following space
 fn read_cmd_id_str(input: &[u8]) -> IResult<&[u8], &[u8]> {
   terminated(take_while1(is_digit), sp)(input)
@@ -192,6 +201,90 @@ named!(keywords<CommandType>,
   )
 );
 
+#[derive(Debug, PartialEq)]
+pub struct Color {
+  pub red: u8,
+  pub green: u8,
+  pub blue: u8,
+}
+
+fn from_hex(input: &[u8]) -> Result<u8, nom::error::ErrorKind> {
+  match std::str::from_utf8(input) {
+    Ok(s) => match u8::from_str_radix(s, 16) {
+      Ok(val) => Ok(val),
+      Err(_) => Err(ErrorKind::AlphaNumeric)
+    },
+    Err(_) => Err(ErrorKind::AlphaNumeric)
+  }
+}
+
+fn is_hex_digit(c: u8) -> bool {
+  (c as char).is_digit(16)
+}
+
+fn hex_primary(input: &[u8]) -> IResult<&[u8], u8> {
+  map_res(take_while_m_n(2, 2, is_hex_digit), from_hex)(input)
+}
+
+fn hex_color(input: &[u8]) -> IResult<&[u8], Color> {
+  let (input, _) = tag(b"#")(input)?;
+  let (input, (red, green, blue)) = tuple((hex_primary, hex_primary, hex_primary))(input)?;
+  Ok((input, Color { red, green, blue }))
+}
+
+named!(digit1_as_u8<u8>,
+  map_res!(
+    map_res!(digit1, str::from_utf8),
+    str::parse::<u8>
+  )
+);
+
+named!(colour<CommandType>,
+  do_parse!(
+    tag!(b"!COLOUR") >>
+    sp >>
+    name: take_not_space >>
+    sp >>
+    tag!(b"CODE") >>
+    sp >>
+    code: color_id >>
+    sp >>
+    tag!(b"VALUE") >>
+    sp >>
+    value: hex_color >>
+    sp >>
+    tag!(b"EDGE") >>
+    sp >>
+    edge: hex_color >>
+    alpha: opt!(
+      do_parse!(
+        sp >>
+        tag!(b"ALPHA") >>
+        sp >>
+        alpha: digit1_as_u8 >> (alpha)
+      )
+    ) >>
+    luminance: opt!(
+      do_parse!(
+        sp >>
+        tag!(b"LUMINANCE") >>
+        sp >>
+        luminance: digit1_as_u8 >> (luminance)
+      )
+    ) >> (
+      CommandType::Colour(ColourCmd{
+        name: std::str::from_utf8(name).unwrap().to_string(),
+        code,
+        value,
+        edge,
+        alpha,
+        luminance,
+        finish: None
+      })
+    )
+  )
+);
+
 named!(comment<CommandType>,
   do_parse!(
     content: take_not_cr_or_lf >> (
@@ -201,7 +294,7 @@ named!(comment<CommandType>,
 );
 
 named!(meta_cmd<CommandType>,
-  alt!(category | keywords | comment)
+  alt!(category | keywords | colour | comment)
 );
 
 named!(sp<char>, char!(' '));
@@ -222,10 +315,10 @@ named!(read_vec3<Vec3>,
   )
 );
 
-named!(color_id<i32>,
+named!(color_id<u32>,
   map_res!(
     map_res!(digit1, str::from_utf8),
-    str::parse::<i32>
+    str::parse::<u32>
   )
 );
 
@@ -233,9 +326,6 @@ named!(color_id<i32>,
 fn is_filename_char(chr: u8) -> bool {
   is_alphanumeric(chr) || chr == b'/' || chr == b'\\' || chr == b'.' || chr == b'-'
 }
-
-use nom::InputTakeAtPosition;
-use nom::error::ErrorKind;
 
 fn filename_char(input: &[u8]) -> IResult<&[u8], &[u8]> {
   // TODO - Split at EOL instead and accept all characters for filename?
@@ -427,8 +517,6 @@ struct QueuedFileRef {
   referer: Rc<RefCell<SourceFile>>
 }
 
-use std::collections::HashSet;
-
 struct ResolveQueue {
   /// Queue of pending items to resolve and load.
   queue: Vec<QueuedFileRef>,
@@ -588,6 +676,30 @@ pub struct KeywordsCmd {
   pub keywords: Vec<String>
 }
 
+/// Finish for color definitions ([!COLOUR language extension](https://www.ldraw.org/article/299.html)).
+#[derive(Debug, PartialEq)]
+pub enum ColorFinish {
+  Chrome,
+  Pearlescent,
+  Rubber,
+  MatteMetallic,
+  Metal,
+  //Material(MaterialFinish) // TODO
+}
+
+/// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
+/// [!COLOUR language extension](https://www.ldraw.org/article/299.html).
+#[derive(Debug, PartialEq)]
+pub struct ColourCmd {
+  pub name: String,
+  pub code: u32,
+  pub value: Color,
+  pub edge: Color,
+  pub alpha: Option<u8>,
+  pub luminance: Option<u8>,
+  pub finish: Option<ColorFinish>
+}
+
 /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) comment.
 #[derive(Debug, PartialEq)]
 pub struct CommentCmd {
@@ -622,7 +734,7 @@ pub enum SubFileRef {
 #[derive(Debug, PartialEq)]
 pub struct SubFileRefCmd {
   /// Color code of the part.
-  pub color: i32,
+  pub color: u32,
   /// Position.
   pub pos: Vec3,
   /// First row of rotation+scaling matrix part.
@@ -640,7 +752,7 @@ pub struct SubFileRefCmd {
 #[derive(Debug, PartialEq)]
 pub struct LineCmd {
   /// Color code of the primitive.
-  pub color: i32,
+  pub color: u32,
   /// Vertices of the segment.
   pub vertices: [Vec3; 2]
 }
@@ -650,7 +762,7 @@ pub struct LineCmd {
 #[derive(Debug, PartialEq)]
 pub struct TriangleCmd {
   /// Color code of the primitive.
-  pub color: i32,
+  pub color: u32,
   /// Vertices of the triangle.
   pub vertices: [Vec3; 3]
 }
@@ -660,7 +772,7 @@ pub struct TriangleCmd {
 #[derive(Debug, PartialEq)]
 pub struct QuadCmd {
   /// Color code of the primitive.
-  pub color: i32,
+  pub color: u32,
   /// Vertices of the quad.
   pub vertices: [Vec3; 4]
 }
@@ -670,7 +782,7 @@ pub struct QuadCmd {
 #[derive(Debug, PartialEq)]
 pub struct OptLineCmd {
   /// Color code of the primitive.
-  pub color: i32,
+  pub color: u32,
   /// Vertices of the segment.
   pub vertices: [Vec3; 2],
   /// Control points of the segment.
@@ -686,6 +798,9 @@ pub enum CommandType {
   /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
   /// [!KEYWORDS language extension](https://www.ldraw.org/article/340.html#keywords).
   Keywords(KeywordsCmd),
+  /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
+  /// [!COLOUR language extension](https://www.ldraw.org/article/299.html).
+  Colour(ColourCmd),
   /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) comment.
   /// Note: any line type 0 not otherwise parsed as a known meta-command is parsed as a generic comment.
   Comment(CommentCmd),
@@ -727,7 +842,45 @@ mod tests {
 
   #[test]
   fn test_color_id() {
+    assert_eq!(color_id(b""), Err(Err::Error((&b""[..], ErrorKind::Digit))));
+    assert_eq!(color_id(b"1"), Ok((&b""[..], 1)));
     assert_eq!(color_id(b"16 "), Ok((&b" "[..], 16)));
+  }
+
+  #[test]
+  fn test_hex_color() {
+    assert_eq!(hex_color(b""), Err(Err::Error((&b""[..], ErrorKind::Tag))));
+    assert_eq!(hex_color(b"#"), Err(Err::Error((&b""[..], ErrorKind::TakeWhileMN))));
+    assert_eq!(hex_color(b"#1"), Err(Err::Error((&b"1"[..], ErrorKind::TakeWhileMN))));
+    assert_eq!(hex_color(b"#12345Z"), Err(Err::Error((&b"5Z"[..], ErrorKind::TakeWhileMN))));
+    assert_eq!(hex_color(b"#123456"), Ok((&b""[..], Color{ red: 0x12, green: 0x34, blue: 0x56 })));
+    assert_eq!(hex_color(b"#ABCDEF"), Ok((&b""[..], Color{ red: 0xAB, green: 0xCD, blue: 0xEF })));
+    assert_eq!(hex_color(b"#8E5cAf"), Ok((&b""[..], Color{ red: 0x8E, green: 0x5C, blue: 0xAF })));
+    assert_eq!(hex_color(b"#123456e"), Ok((&b"e"[..], Color{ red: 0x12, green: 0x34, blue: 0x56 })));
+  }
+
+  #[test]
+  fn test_digit1_as_u8() {
+    assert_eq!(digit1_as_u8(b""), Err(Err::Error((&b""[..], ErrorKind::Digit))));
+    assert_eq!(digit1_as_u8(b"0"), Ok((&b""[..], 0u8)));
+    assert_eq!(digit1_as_u8(b"1"), Ok((&b""[..], 1u8)));
+    assert_eq!(digit1_as_u8(b"255"), Ok((&b""[..], 255u8)));
+    assert_eq!(digit1_as_u8(b"256"), Err(Err::Error((&b"256"[..], ErrorKind::MapRes))));
+    assert_eq!(digit1_as_u8(b"32 "), Ok((&b" "[..], 32u8)));
+  }
+
+  #[test]
+  fn test_colour() {
+    assert_eq!(colour(b""), Err(Err::Incomplete(Needed::Size(7))));
+    assert_eq!(colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef"), Ok((&b""[..], CommandType::Colour(ColourCmd{
+      name: "test_col".to_string(),
+      code: 20,
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      edge: Color{ red: 0xAB, green: 0xCD, blue: 0xEF },
+      alpha: None,
+      luminance: None,
+      finish: None
+    }))));
   }
 
   #[test]
