@@ -131,17 +131,65 @@ fn take_not_cr_or_lf(input: &[u8]) -> IResult<&[u8], &[u8]> {
   input.split_at_position_complete(|item| is_cr_or_lf(item))
 }
 
+// Parse a single comma ',' character.
+fn single_comma(input: &[u8]) -> IResult<&[u8], &[u8]> {
+  if !input.is_empty() && (input[0] == b',') {
+    Ok((&input[1..], &input[..1]))
+  } else {
+    // To work with separated_list!(), must return an Err::Error
+    // when the separator doesn't parse anymore (and therefore
+    // the list ends).
+    Err(nom::Err::Error((input, nom::error::ErrorKind::Tag)))
+  }
+}
+
+// Parse any character which is not a comma ',' or <CR> or <LF>, potentially until the end of input.
+fn take_not_comma_or_eol(input: &[u8]) -> IResult<&[u8], &[u8]> {
+  input.split_at_position_complete(|item| item == b',' || is_cr_or_lf(item))
+}
+
 // Read the command ID and swallow the following space
 fn read_cmd_id_str(input: &[u8]) -> IResult<&[u8], &[u8]> {
   terminated(take_while1(is_digit), sp)(input)
 }
 
-named!(meta_cmd<CommandType>,
+named!(category<CommandType>,
   do_parse!(
+    tag!(b"!CATEGORY") >>
+    sp >>
     content: take_not_cr_or_lf >> (
-      CommandType::Command(Cmd{ content: std::str::from_utf8(content).unwrap().to_string() })
+      CommandType::Category(CategoryCmd{ category: std::str::from_utf8(content).unwrap().to_string() })
     )
   )
+);
+
+named!(keywords_list<Vec<&[u8]>>,
+  separated_nonempty_list!(
+    single_comma,
+    take_not_comma_or_eol
+  )
+);
+
+named!(keywords<CommandType>,
+  do_parse!(
+    tag!(b"!KEYWORDS") >>
+    sp >>
+    keywords: keywords_list >> (
+      CommandType::Keywords(KeywordsCmd{ keywords: keywords.iter().map(|&kw| std::str::from_utf8(kw).unwrap().trim().to_string()).collect() })
+    )
+  )
+);
+
+named!(comment<CommandType>,
+  do_parse!(
+    content: take_not_cr_or_lf >> (
+      CommandType::Comment(CommentCmd{ text: std::str::from_utf8(content).unwrap().to_string() })
+    )
+  )
+);
+
+named!(meta_cmd<CommandType>,
+  alt!(category | keywords | comment)
 );
 
 named!(pub sp<char>, char!(' '));
@@ -489,19 +537,26 @@ pub fn parse(filename: &str, resolver: &dyn FileRefResolver, source_map: &mut Ha
   root_file
 }
 
-/// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) comment or META command,
-/// when not otherwise interpreted as a meta-command.
+/// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
+/// [!CATEGORY language extension](https://www.ldraw.org/article/340.html#category).
 #[derive(Debug, PartialEq)]
-pub struct Cmd {
-  /// Verbatim content of the command, excluding the initial `0` identifier.
-  content: String
+pub struct CategoryCmd {
+  /// Category name.
+  category: String
+}
+
+/// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
+/// [!KEYWORDS language extension](https://www.ldraw.org/article/340.html#keywords).
+#[derive(Debug, PartialEq)]
+pub struct KeywordsCmd {
+  /// List of keywords.
+  keywords: Vec<String>
 }
 
 /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) comment.
 #[derive(Debug, PartialEq)]
-pub struct Comment {
-  /// Comment content, excluding the command identififer `0` and the optional comment
-  /// marker `//`.
+pub struct CommentCmd {
+  /// Comment content, excluding the command identififer `0` and the optional comment marker `//`.
   text: String
 }
 
@@ -593,8 +648,15 @@ pub struct OptLineCmd {
 /// Types of commands contained in a LDraw file.
 #[derive(Debug, PartialEq)]
 pub enum CommandType {
-  /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) comment or META command.
-  Command(Cmd),
+  /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
+  /// [!CATEGORY language extension](https://www.ldraw.org/article/340.html#category).
+  Category(CategoryCmd),
+  /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
+  /// [!KEYWORDS language extension](https://www.ldraw.org/article/340.html#keywords).
+  Keywords(KeywordsCmd),
+  /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) comment.
+  /// Note: any line type 0 not otherwise parsed as a known meta-command is parsed as a generic comment.
+  Comment(CommentCmd),
   /// [Line Type 1](https://www.ldraw.org/article/218.html#lt1) sub-file reference.
   SubFileRef(SubFileRefCmd),
   /// [Line Type 2](https://www.ldraw.org/article/218.html#lt2) segment.
@@ -663,7 +725,22 @@ mod tests {
   }
 
   use nom::{Err, Needed};
-  use nom::error::ErrorKind::AlphaNumeric;
+  use nom::error::ErrorKind;
+
+  #[test]
+  fn test_single_comma() {
+    assert_eq!(single_comma(b""), Err(Err::Error((&b""[..], ErrorKind::Tag))));
+    assert_eq!(single_comma(b","), Ok((&b""[..], &b","[..])));
+    assert_eq!(single_comma(b",s"), Ok((&b"s"[..], &b","[..])));
+    assert_eq!(single_comma(b"w,s"), Err(Err::Error((&b"w,s"[..], ErrorKind::Tag))));
+  }
+
+  #[test]
+  fn test_keywords_list() {
+    assert_eq!(keywords_list(b""), Err(Err::Error((&b""[..], ErrorKind::SeparatedList))));
+    assert_eq!(keywords_list(b"a"), Ok((&b""[..], vec![&b"a"[..]])));
+    assert_eq!(keywords_list(b"a,b,c"), Ok((&b""[..], vec![&b"a"[..], &b"b"[..], &b"c"[..]])));
+  }
 
   #[test]
   fn test_filename_char() {
@@ -684,9 +761,28 @@ mod tests {
   }
 
   #[test]
-  fn test_meta_cmd() {
-    let res = CommandType::Command(Cmd{ content: "test of metacommand".to_string() });
-    assert_eq!(meta_cmd(b"test of metacommand"), Ok((&b""[..], res)));
+  fn test_category_cmd() {
+    let res = CommandType::Category(CategoryCmd{ category: "Figure Accessory".to_string() });
+    assert_eq!(category(b"!CATEGORY Figure Accessory"), Ok((&b""[..], res)));
+  }
+
+  #[test]
+  fn test_keywords_cmd() {
+    let res = CommandType::Keywords(KeywordsCmd{ keywords: vec![
+      "western".to_string(),
+      "wild west".to_string(),
+      "spaghetti western".to_string(),
+      "horse opera".to_string(),
+      "cowboy".to_string()
+    ] });
+    assert_eq!(keywords(b"!KEYWORDS western, wild west, spaghetti western, horse opera, cowboy"), Ok((&b""[..], res)));
+  }
+
+  #[test]
+  fn test_comment_cmd() {
+    let comment = b"test of comment, with \"weird\" characters";
+    let res = CommandType::Comment(CommentCmd{ text: std::str::from_utf8(comment).unwrap().to_string() });
+    assert_eq!(meta_cmd(comment), Ok((&b""[..], res)));
   }
 
   #[test]
@@ -742,7 +838,7 @@ mod tests {
 
   #[test]
   fn test_read_cmd() {
-    let res = CommandType::Command(Cmd{ content: "this doesn't matter".to_string() });
+    let res = CommandType::Comment(CommentCmd{ text: "this doesn't matter".to_string() });
     assert_eq!(read_line(b"0 this doesn't matter"), Ok((&b""[..], res)));
   }
 
@@ -803,7 +899,7 @@ mod tests {
 
   #[test]
   fn test_read_lines() {
-    let cmd0 = CommandType::Command(Cmd{ content: "this doesn't matter".to_string() });
+    let cmd0 = CommandType::Comment(CommentCmd{ text: "this doesn't matter".to_string() });
     let cmd1 = CommandType::SubFileRef(SubFileRefCmd{
       color: 16,
       pos: Vec3{ x: 0.0, y: 0.0, z: 0.0 },
@@ -814,7 +910,7 @@ mod tests {
     });
     assert_eq!(read_lines(b"\n0 this doesn't matter\n\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd"), Ok((&b""[..], vec![cmd0, cmd1])));
     
-    let cmd0 = CommandType::Command(Cmd{ content: "this doesn't \"matter\"".to_string() });
+    let cmd0 = CommandType::Comment(CommentCmd{ text: "this doesn't \"matter\"".to_string() });
     let cmd1 = CommandType::SubFileRef(SubFileRefCmd{
       color: 16,
       pos: Vec3{ x: 0.0, y: 0.0, z: 0.0 },
