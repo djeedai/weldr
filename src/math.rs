@@ -1,6 +1,9 @@
 #![cfg(not(feature = "cgmath"))]
 
-/// Generic 3-component vector.
+/// Generic 3-component vector for drawing commands.
+///
+/// With the `cgmath` feature (default), this is an alias to `cgmath::Vector3<f32>`.
+/// Without it, the `Vec3` type is defined as a built-in struct with basic operations overloaded.
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Vec3 {
     pub x: f32,
