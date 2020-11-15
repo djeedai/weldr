@@ -97,7 +97,7 @@ use nom::{
 mod math;
 
 #[cfg(not(feature = "cgmath"))]
-use math::Vec3;
+pub use math::Vec3;
 
 /// Generic 3-component vector for drawing commands.
 ///
