@@ -52,6 +52,10 @@
 //!
 //! - UTF-8 encoded input
 //! - Both DOS/Windows `<CR><LF>` and Unix `<LF>` line termination accepted
+//! 
+//! Drawing commands generally involve some vertex type. By default the `cgmath` feature defines the `Vec3` type
+//! as an alias for the `cgmath::Vector3<f32>` type. This can be disabled by removing the default features, in
+//! which case the `Vec3` falls back to a minimal built-in implementation.
 //!
 //! ## Copyrights
 //!
@@ -95,8 +99,12 @@ mod math;
 #[cfg(not(feature = "cgmath"))]
 use math::Vec3;
 
+/// Generic 3-component vector for drawing commands.
+///
+/// With the `cgmath` feature (default), this is an alias to `cgmath::Vector3<f32>`.
+/// Without it, the `Vec3` type is defined as a built-in struct with basic operations overloaded.
 #[cfg(feature = "cgmath")]
-type Vec3 = cgmath::Vector3<f32>;
+pub type Vec3 = cgmath::Vector3<f32>;
 
 // LDraw File Format Specification
 // https://www.ldraw.org/article/218.html
@@ -126,7 +134,7 @@ fn end_of_line(input: &[u8]) -> IResult<&[u8], &[u8]> {
 // and <LF>. Note that this doesn't necessarily means a proper end of line if <CR>
 // is not followed by <LF>, but we assume this doesn't happen.
 #[inline]
-pub fn is_cr_or_lf(chr: u8) -> bool {
+fn is_cr_or_lf(chr: u8) -> bool {
   chr == b'\n' || chr == b'\r'
 }
 
@@ -196,7 +204,7 @@ named!(meta_cmd<CommandType>,
   alt!(category | keywords | comment)
 );
 
-named!(pub sp<char>, char!(' '));
+named!(sp<char>, char!(' '));
 
 named!(read_vec3<Vec3>,
   do_parse!(
@@ -365,7 +373,7 @@ named!(empty_line,
 //
 // "The line type of a line is the first number on the line."
 // "If the line type of the command is invalid, the line is ignored."
-named!(pub read_line<CommandType>,
+named!(read_line<CommandType>,
   do_parse!(
     space_or_eol0 >>
     cmd: switch!(read_cmd_id_str,
@@ -569,7 +577,7 @@ pub fn parse(filename: &str, resolver: &dyn FileRefResolver, source_map: &mut Ha
 #[derive(Debug, PartialEq)]
 pub struct CategoryCmd {
   /// Category name.
-  category: String
+  pub category: String
 }
 
 /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
@@ -577,14 +585,14 @@ pub struct CategoryCmd {
 #[derive(Debug, PartialEq)]
 pub struct KeywordsCmd {
   /// List of keywords.
-  keywords: Vec<String>
+  pub keywords: Vec<String>
 }
 
 /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) comment.
 #[derive(Debug, PartialEq)]
 pub struct CommentCmd {
   /// Comment content, excluding the command identififer `0` and the optional comment marker `//`.
-  text: String
+  pub text: String
 }
 
 /// Single LDraw source file loaded and optionally parsed.
@@ -600,15 +608,17 @@ pub struct SourceFile {
   pub cmds: Vec<CommandType>
 }
 
+/// Reference to a sub-file from inside another file.
 #[derive(Debug, PartialEq)]
 pub enum SubFileRef {
+  /// Resolved reference pointing to the given loaded/parsed sub-file.
   ResolvedRef(Rc<RefCell<SourceFile>>),
+  /// Unresolved reference containing the raw reference filename.
   UnresolvedRef(String)
 }
 
-/// Line Type 1 LDraw command to reference a sub-file from the current file.
-/// 
-/// [Specification](https://www.ldraw.org/article/218.html#lt1)
+/// [Line Type 1](https://www.ldraw.org/article/218.html#lt1) LDraw command:
+/// Reference a sub-file from the current file.
 #[derive(Debug, PartialEq)]
 pub struct SubFileRefCmd {
   /// Color code of the part.
@@ -625,9 +635,8 @@ pub struct SubFileRefCmd {
   pub file: SubFileRef
 }
 
-/// Line Type 2 LDraw command to draw a segment between 2 vertices.
-/// 
-/// [Specification](https://www.ldraw.org/article/218.html#lt2)
+/// [Line Type 2](https://www.ldraw.org/article/218.html#lt2) LDraw command:
+/// Draw a segment between 2 vertices.
 #[derive(Debug, PartialEq)]
 pub struct LineCmd {
   /// Color code of the primitive.
@@ -636,9 +645,8 @@ pub struct LineCmd {
   pub vertices: [Vec3; 2]
 }
 
-/// Line Type 3 LDraw command to draw a triangle between 3 vertices.
-/// 
-/// [Specification](https://www.ldraw.org/article/218.html#lt3)
+/// [Line Type 3](https://www.ldraw.org/article/218.html#lt3) LDraw command:
+/// Draw a triangle between 3 vertices.
 #[derive(Debug, PartialEq)]
 pub struct TriangleCmd {
   /// Color code of the primitive.
@@ -647,9 +655,8 @@ pub struct TriangleCmd {
   pub vertices: [Vec3; 3]
 }
 
-/// Line Type 4 LDraw command to draw a quad between 4 vertices.
-/// 
-/// [Specification](https://www.ldraw.org/article/218.html#lt4)
+/// [Line Type 4](https://www.ldraw.org/article/218.html#lt4) LDraw command:
+/// Draw a quad between 4 vertices.
 #[derive(Debug, PartialEq)]
 pub struct QuadCmd {
   /// Color code of the primitive.
@@ -658,10 +665,8 @@ pub struct QuadCmd {
   pub vertices: [Vec3; 4]
 }
 
-/// Line Type 5 LDraw command to draw an optional segment between two vertices,
-/// aided by 2 control points.
-/// 
-/// [Specification](https://www.ldraw.org/article/218.html#lt5)
+/// [Line Type 5](https://www.ldraw.org/article/218.html#lt5) LDraw command:
+/// Draw an optional segment between two vertices, aided by 2 control points.
 #[derive(Debug, PartialEq)]
 pub struct OptLineCmd {
   /// Color code of the primitive.
