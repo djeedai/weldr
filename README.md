@@ -12,32 +12,28 @@ weldr allows building command-line tools and applications leveraging [the fantas
 
 ## Example
 
-Parse a single `.ldr` line containing a [file reference command (line type 1)](https://www.ldraw.org/article/218.html#lt1):
+Parse a single `.ldr` file containing 2 commands:
 
 ```rust
 extern crate weldr;
 
-use weldr::read_lines;
+use weldr::{parse_raw, CommandType, CommentCmd, LineCmd, Vec3};
 
 fn main() {}
 
 #[test]
-fn parse_file_ref() {
-  let ldr = b"1 16 0 0 0 1 0 0 0 1 0 0 0 1 s/6143.dat";
-  let data = read_lines(ldr);
-  let res = CommandType::SubFileRef(SubFileRefCmd{
+fn test_weldr() {
+  let cmd0 = CommandType::Comment(CommentCmd{ text: "this is a comment".to_string() });
+  let cmd1 = CommandType::Line(LineCmd{
     color: 16,
-    pos: Vec3{ x: 0.0, y: 0.0, z: 0.0 },
-    row0: Vec3{ x: 1.0, y: 0.0, z: 0.0 },
-    row1: Vec3{ x: 0.0, y: 1.0, z: 0.0 },
-    row2: Vec3{ x: 0.0, y: 0.0, z: 1.0 },
-    file: "s/6143.dat"
+    vertices: [
+      Vec3{ x: 0.0, y: 0.0, z: 0.0 },
+      Vec3{ x: 1.0, y: 1.0, z: 1.0 }
+    ]
   });
-  assert_eq!(data, Ok((&b""[..], vec![res])));
+  assert_eq!(parse_raw(b"0 this is a comment\n2 16 0 0 0 1 1 1"), vec![cmd0, cmd1]);
 }
 ```
-
-The `read_lines()` function can be used to parse an entire file too.
 
 ## Documentation
 

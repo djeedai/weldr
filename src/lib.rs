@@ -10,32 +10,36 @@
 //!
 //! ## Example
 //!
-//! Parse a single `.ldr` line containing a [file reference command (line type 1)](https://www.ldraw.org/article/218.html#lt1):
+//! Parse a single LDraw file containing 2 commands:
+//! - A comment : "this is a comment"
+//! - A segment command to draw a segment between 2 vertices
 //!
 //! ```rust
 //! extern crate weldr;
 //!
-//! use weldr::read_lines;
+//! use weldr::{parse_raw, CommandType, CommentCmd, LineCmd, Vec3};
 //!
 //! fn main() {}
 //!
 //! #[test]
-//! fn parse_file_ref() {
-//!   let ldr = b"1 16 0 0 0 1 0 0 0 1 0 0 0 1 s/6143.dat";
-//!   let data = read_lines(ldr);
-//!   let res = CommandType::SubFileRef(SubFileRefCmd{
+//! fn parse_ldr() {
+//!   let ldr = b"0 this is a comment\n2 16 0 0 0 1 1 1";
+//!   let cmds = parse_raw(ldr);
+//!   let cmd0 = CommandType::Comment(CommentCmd{ text: "this is a comment".to_string() });
+//!   let cmd1 = CommandType::Line(LineCmd{
 //!     color: 16,
-//!     pos: Vec3{ x: 0.0, y: 0.0, z: 0.0 },
-//!     row0: Vec3{ x: 1.0, y: 0.0, z: 0.0 },
-//!     row1: Vec3{ x: 0.0, y: 1.0, z: 0.0 },
-//!     row2: Vec3{ x: 0.0, y: 0.0, z: 1.0 },
-//!     file: "s/6143.dat"
+//!     vertices: [
+//!       Vec3{ x: 0.0, y: 0.0, z: 0.0 },
+//!       Vec3{ x: 1.0, y: 1.0, z: 1.0 }
+//!     ]
 //!   });
-//!   assert_eq!(data, Ok((&b""[..], vec![res])));
+//!   assert_eq!(cmds, vec![cmd0, cmd1]);
 //! }
 //! ```
-//!
-//! The `read_lines()` function can be used to parse an entire file too.
+//! 
+//! A slightly more involved but more powerful approach is to load and resolve a file and all its
+//! sub-file references recursively using the `parse()` function. This requires implementing the
+//! `FileRefResolver` trait to load file content by reference filename.
 //!
 //! The code is available on [GitHub](https://github.com/djeedai/weldr).
 //!
@@ -376,10 +380,37 @@ named!(pub read_line<CommandType>,
   )
 );
 
-// "An LDraw file consists of one command per line."
-named!(pub read_lines<Vec<CommandType>>,
-  many0!(read_line)
-);
+/// Parse raw LDR content without sub-file resolution.
+///
+/// Parse the given LDR data passed in [`ldr_content`] and return the list of parsed commands.
+/// Sub-file references (Line Type 1) are not resolved, and returned as [`SubFileRef::UnresolvedRef`].
+///
+/// The input LDR content must comply to the LDraw standard. In particular this means:
+/// - UTF-8 encoded, without Byte Order Mark (BOM)
+/// - Both DOS/Windows <CR><LF> and Unix <LF> line termination accepted
+/// 
+/// ```rust
+/// use weldr::{parse_raw, CommandType, CommentCmd, LineCmd, Vec3};
+/// 
+/// fn main() {
+///   let cmd0 = CommandType::Comment(CommentCmd{ text: "this is a comment".to_string() });
+///   let cmd1 = CommandType::Line(LineCmd{
+///     color: 16,
+///     vertices: [
+///       Vec3{ x: 0.0, y: 0.0, z: 0.0 },
+///       Vec3{ x: 1.0, y: 1.0, z: 1.0 }
+///     ]
+///   });
+///   assert_eq!(parse_raw(b"0 this is a comment\n2 16 0 0 0 1 1 1"), vec![cmd0, cmd1]);
+/// }
+/// ```
+pub fn parse_raw(ldr_content: &[u8]) -> Vec<CommandType> {
+  // "An LDraw file consists of one command per line."
+  match many0(read_line)(ldr_content) {
+    Ok((_, cmds)) => cmds,
+    Err(_) => panic!("TODO - Error handling")
+  }
+}
 
 struct QueuedFileRef {
   /// Filename of unresolved source file.
@@ -434,8 +465,8 @@ fn resolve_file_refs(source_file: Rc<RefCell<SourceFile>>, queue: &mut ResolveQu
   let mut subfile_set = HashSet::new();
   for cmd in &mut source_file.borrow_mut().cmds {
     if let CommandType::SubFileRef(sfr_cmd) = cmd {
-      // All subfile refs come out of read_lines() as unresolved by definition,
-      // since read_lines() doesn't have access to the source map nor the resolver.
+      // All subfile refs come out of parse_raw() as unresolved by definition,
+      // since parse_raw() doesn't have access to the source map nor the resolver.
       // See if we can resolve some of them now.
       if let SubFileRef::UnresolvedRef(subfilename) = &sfr_cmd.file {
         // Check the source map
@@ -465,16 +496,12 @@ fn load_and_parse_single_file(filename: &str, resolver: &dyn FileRefResolver) ->
     raw_content,
     cmds: Vec::new()
   };
-  match read_lines(&source_file.raw_content[..]) {
-    Ok((_, cmds)) => {
-      source_file.cmds = cmds;
-      source_file
-    },
-    Err(_) => panic!("TODO : handle parsing error")
-  }
+  let cmds = parse_raw(&source_file.raw_content[..]);
+  source_file.cmds = cmds;
+  source_file
 }
 
-/// Parse a single file using the given resolver and source map.
+/// Parse a single file and its sub-file references recursively.
 ///
 /// Attempt to load the content of `filename` via the given `resolver`, and parse it.
 /// Then recursiverly look for sub-file commands inside that root file, and try to resolve
@@ -898,7 +925,17 @@ mod tests {
   }
 
   #[test]
-  fn test_read_lines() {
+  fn test_parse_raw() {
+    let cmd0 = CommandType::Comment(CommentCmd{ text: "this is a comment".to_string() });
+    let cmd1 = CommandType::Line(LineCmd{
+      color: 16,
+      vertices: [
+        Vec3{ x: 0.0, y: 0.0, z: 0.0 },
+        Vec3{ x: 1.0, y: 1.0, z: 1.0 }
+      ]
+    });
+    assert_eq!(parse_raw(b"0 this is a comment\n2 16 0 0 0 1 1 1"), vec![cmd0, cmd1]);
+
     let cmd0 = CommandType::Comment(CommentCmd{ text: "this doesn't matter".to_string() });
     let cmd1 = CommandType::SubFileRef(SubFileRefCmd{
       color: 16,
@@ -908,7 +945,7 @@ mod tests {
       row2: Vec3{ x: 0.0, y: 0.0, z: 1.0 },
       file: SubFileRef::UnresolvedRef("aa/aaaaddd".to_string())
     });
-    assert_eq!(read_lines(b"\n0 this doesn't matter\n\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd"), Ok((&b""[..], vec![cmd0, cmd1])));
+    assert_eq!(parse_raw(b"\n0 this doesn't matter\n\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd"), vec![cmd0, cmd1]);
     
     let cmd0 = CommandType::Comment(CommentCmd{ text: "this doesn't \"matter\"".to_string() });
     let cmd1 = CommandType::SubFileRef(SubFileRefCmd{
@@ -919,7 +956,7 @@ mod tests {
       row2: Vec3{ x: 0.0, y: 0.0, z: 1.0 },
       file: SubFileRef::UnresolvedRef("aa/aaaaddd".to_string())
     });
-    assert_eq!(read_lines(b"\r\n0 this doesn't \"matter\"\r\n\r\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd\n"), Ok((&b""[..], vec![cmd0, cmd1])));
+    assert_eq!(parse_raw(b"\r\n0 this doesn't \"matter\"\r\n\r\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd\n"), vec![cmd0, cmd1]);
 
     let cmd0 = CommandType::SubFileRef(SubFileRefCmd{
       color: 16,
@@ -937,6 +974,6 @@ mod tests {
       row2: Vec3{ x: 0.0, y: 0.0, z: 1.0 },
       file: SubFileRef::UnresolvedRef("aa/aaaaddd".to_string())
     });
-    assert_eq!(read_lines(b"1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd"), Ok((&b""[..], vec![cmd0, cmd1])));
+    assert_eq!(parse_raw(b"1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd"), vec![cmd0, cmd1]);
   }
 }
