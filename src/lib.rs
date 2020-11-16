@@ -76,20 +76,24 @@ extern crate nom;
 extern crate cgmath;
 
 use std::{
-  str, str::FromStr, str::from_utf8,
-  collections::HashMap,
+  str::{self, FromStr, from_utf8},
+  collections::{HashMap, HashSet},
+  num::ParseIntError,
   rc::Rc,
   cell::RefCell
 };
 use nom::{
-  bytes::complete::{take_while1, take_until},
+  bytes::complete::{tag, take_while1, take_while_m_n, take_until},
   character::{
     is_alphabetic, is_alphanumeric, is_digit,
     complete::{alphanumeric1 as alphanumeric, line_ending as eol, digit1},
   },
-  number::complete::float,
+  combinator::map_res,
+  error::ErrorKind,
   multi::many0,
-  sequence::terminated,
+  number::complete::float,
+  sequence::{terminated, tuple},
+  InputTakeAtPosition,
   IResult,
 };
 
@@ -160,6 +164,11 @@ fn take_not_comma_or_eol(input: &[u8]) -> IResult<&[u8], &[u8]> {
   input.split_at_position_complete(|item| item == b',' || is_cr_or_lf(item))
 }
 
+// Parse any character which is not a space, potentially until the end of input.
+fn take_not_space(input: &[u8]) -> IResult<&[u8], &[u8]> {
+  input.split_at_position_complete(|item| is_space(item))
+}
+
 // Read the command ID and swallow the following space
 fn read_cmd_id_str(input: &[u8]) -> IResult<&[u8], &[u8]> {
   terminated(take_while1(is_digit), sp)(input)
@@ -192,6 +201,218 @@ named!(keywords<CommandType>,
   )
 );
 
+/// RGB color in sRGB color space.
+#[derive(Debug, PartialEq)]
+pub struct Color {
+  pub red: u8,
+  pub green: u8,
+  pub blue: u8,
+}
+
+fn from_hex(input: &[u8]) -> Result<u8, nom::error::ErrorKind> {
+  match std::str::from_utf8(input) {
+    Ok(s) => match u8::from_str_radix(s, 16) {
+      Ok(val) => Ok(val),
+      Err(_) => Err(ErrorKind::AlphaNumeric)
+    },
+    Err(_) => Err(ErrorKind::AlphaNumeric)
+  }
+}
+
+fn is_hex_digit(c: u8) -> bool {
+  (c as char).is_digit(16)
+}
+
+fn hex_primary(input: &[u8]) -> IResult<&[u8], u8> {
+  map_res(take_while_m_n(2, 2, is_hex_digit), from_hex)(input)
+}
+
+fn hex_color(input: &[u8]) -> IResult<&[u8], Color> {
+  let (input, _) = tag(b"#")(input)?;
+  let (input, (red, green, blue)) = tuple((hex_primary, hex_primary, hex_primary))(input)?;
+  Ok((input, Color { red, green, blue }))
+}
+
+named!(digit1_as_u8<u8>,
+  map_res!(
+    map_res!(digit1, str::from_utf8),
+    str::parse::<u8>
+  )
+);
+
+// ALPHA part of !COLOUR
+named!(colour_alpha<Option<u8>>,
+  opt!(
+    complete!(
+      do_parse!(
+        sp >>
+        tag!(b"ALPHA") >>
+        sp >>
+        alpha: digit1_as_u8 >> (alpha)
+      )
+    )
+  )
+);
+
+// LUMINANCE part of !COLOUR
+named!(colour_luminance<Option<u8>>,
+  opt!(
+    complete!(
+      do_parse!(
+        sp >>
+        tag!(b"LUMINANCE") >>
+        sp >>
+        luminance: digit1_as_u8 >> (luminance)
+      )
+    )
+  )
+);
+
+named!(material_grain_size<GrainSize>,
+  alt!(
+    do_parse!(
+      tag!(b"SIZE") >>
+      sp >>
+      size: float >> (GrainSize::Size(size))
+    ) |
+    do_parse!(
+      tag!(b"MINSIZE") >>
+      sp >>
+      min_size: float >>
+      sp >>
+      tag!(b"MAXSIZE") >>
+      sp >>
+      max_size: float >> (GrainSize::MinMaxSize((min_size, max_size)))
+    )
+  )
+);
+
+// GLITTER VALUE v [ALPHA a] [LUMINANCE l] FRACTION f VFRACTION vf (SIZE s | MINSIZE min MAXSIZE max)
+named!(glitter_material<ColorFinish>,
+  do_parse!(
+    tag_no_case!(b"GLITTER") >>
+    sp >>
+    tag_no_case!(b"VALUE") >>
+    sp >>
+    value: hex_color >>
+    alpha: colour_alpha >>
+    luminance: colour_luminance >>
+    sp >>
+    tag_no_case!(b"FRACTION") >>
+    sp >>
+    surface_fraction: float >>
+    sp >>
+    tag_no_case!(b"VFRACTION") >>
+    sp >>
+    volume_fraction: float >>
+    sp >>
+    grain_size: material_grain_size >>
+    (ColorFinish::Material(MaterialFinish::Glitter(GlitterMaterial{
+      value,
+      alpha,
+      luminance,
+      surface_fraction,
+      volume_fraction,
+      size: grain_size
+    })))
+  )
+);
+
+// SPECKLE VALUE v [ALPHA a] [LUMINANCE l] FRACTION f (SIZE s | MINSIZE min MAXSIZE max)
+named!(speckle_material<ColorFinish>,
+  do_parse!(
+    tag_no_case!(b"SPECKLE") >>
+    sp >>
+    tag_no_case!(b"VALUE") >>
+    sp >>
+    value: hex_color >>
+    alpha: colour_alpha >>
+    luminance: colour_luminance >>
+    sp >>
+    tag_no_case!(b"FRACTION") >>
+    sp >>
+    surface_fraction: float >>
+    sp >>
+    grain_size: material_grain_size >>
+    (ColorFinish::Material(MaterialFinish::Speckle(SpeckleMaterial{
+      value,
+      alpha,
+      luminance,
+      surface_fraction,
+      size: grain_size
+    })))
+  )
+);
+
+// Other unrecognized MATERIAL definition
+named!(other_material<ColorFinish>,
+  do_parse!(
+    raw_content: take_not_cr_or_lf >>
+    (ColorFinish::Material(MaterialFinish::Other(str::from_utf8(raw_content).unwrap().trim().to_string())))
+  )
+);
+
+// MATERIAL finish part of !COLOUR
+named!(material_finish<ColorFinish>,
+  do_parse!(
+    tag_no_case!(b"MATERIAL") >>
+    material_finish: alt!(glitter_material | speckle_material | other_material) >> (material_finish)
+  )
+);
+
+// Finish part of !COLOUR
+named!(color_finish<Option<ColorFinish>>,
+  opt!(
+    complete!(
+      do_parse!(
+        sp >>
+        color_finish: alt!(
+          tag_no_case!(b"CHROME")         => { |_| ColorFinish::Chrome } |
+          tag_no_case!(b"PEARLESCENT")    => { |_| ColorFinish::Pearlescent } |
+          tag_no_case!(b"RUBBER")         => { |_| ColorFinish::Rubber } |
+          tag_no_case!(b"MATTE_METALLIC") => { |_| ColorFinish::MatteMetallic } |
+          tag_no_case!(b"METAL")          => { |_| ColorFinish::Metal } |
+          material_finish
+        ) >> (color_finish)
+      )
+    )
+  )
+);
+
+// !COLOUR extension meta-command
+named!(meta_colour<CommandType>,
+  do_parse!(
+    tag!(b"!COLOUR") >>
+    sp >>
+    name: take_not_space >>
+    sp >>
+    tag!(b"CODE") >>
+    sp >>
+    code: color_id >>
+    sp >>
+    tag!(b"VALUE") >>
+    sp >>
+    value: hex_color >>
+    sp >>
+    tag!(b"EDGE") >>
+    sp >>
+    edge: hex_color >>
+    alpha: colour_alpha >>
+    luminance: colour_luminance >>
+    finish: color_finish >> (
+      CommandType::Colour(ColourCmd{
+        name: std::str::from_utf8(name).unwrap().to_string(),
+        code,
+        value,
+        edge,
+        alpha,
+        luminance,
+        finish: finish
+      })
+    )
+  )
+);
+
 named!(comment<CommandType>,
   do_parse!(
     content: take_not_cr_or_lf >> (
@@ -201,7 +422,7 @@ named!(comment<CommandType>,
 );
 
 named!(meta_cmd<CommandType>,
-  alt!(category | keywords | comment)
+  alt!(category | keywords | meta_colour | comment)
 );
 
 named!(sp<char>, char!(' '));
@@ -222,10 +443,10 @@ named!(read_vec3<Vec3>,
   )
 );
 
-named!(color_id<i32>,
+named!(color_id<u32>,
   map_res!(
     map_res!(digit1, str::from_utf8),
-    str::parse::<i32>
+    str::parse::<u32>
   )
 );
 
@@ -233,9 +454,6 @@ named!(color_id<i32>,
 fn is_filename_char(chr: u8) -> bool {
   is_alphanumeric(chr) || chr == b'/' || chr == b'\\' || chr == b'.' || chr == b'-'
 }
-
-use nom::InputTakeAtPosition;
-use nom::error::ErrorKind;
 
 fn filename_char(input: &[u8]) -> IResult<&[u8], &[u8]> {
   // TODO - Split at EOL instead and accept all characters for filename?
@@ -427,8 +645,6 @@ struct QueuedFileRef {
   referer: Rc<RefCell<SourceFile>>
 }
 
-use std::collections::HashSet;
-
 struct ResolveQueue {
   /// Queue of pending items to resolve and load.
   queue: Vec<QueuedFileRef>,
@@ -588,6 +804,84 @@ pub struct KeywordsCmd {
   pub keywords: Vec<String>
 }
 
+/// Finish for color definitions ([!COLOUR language extension](https://www.ldraw.org/article/299.html)).
+#[derive(Debug, PartialEq)]
+pub enum ColorFinish {
+  Chrome,
+  Pearlescent,
+  Rubber,
+  MatteMetallic,
+  Metal,
+  Material(MaterialFinish)
+}
+
+/// Finish for optional MATERIAL part of color definition
+/// ([!COLOUR language extension](https://www.ldraw.org/article/299.html)).
+#[derive(Debug, PartialEq)]
+pub enum MaterialFinish {
+  Glitter(GlitterMaterial),
+  Speckle(SpeckleMaterial),
+  Other(String)
+}
+
+/// Grain size variants for the optional MATERIAL part of color definition
+/// ([!COLOUR language extension](https://www.ldraw.org/article/299.html)).
+#[derive(Debug, PartialEq)]
+pub enum GrainSize {
+  Size(f32),
+  MinMaxSize((f32, f32))
+}
+
+#[derive(Debug, PartialEq)]
+pub struct GlitterMaterial {
+  /// Primary color value of the material.
+  pub value: Color,
+  /// Optional alpha (opacity) value.
+  pub alpha: Option<u8>,
+  /// Optional brightness value.
+  pub luminance: Option<u8>,
+  /// Fraction of the surface using the alternate color.
+  pub surface_fraction: f32,
+  /// Fraction of the volume using the alternate color.
+  pub volume_fraction: f32,
+  /// Size of glitter grains.
+  pub size: GrainSize,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct SpeckleMaterial {
+  /// Primary color value of the material.
+  pub value: Color,
+  /// Optional alpha (opacity) value.
+  pub alpha: Option<u8>,
+  /// Optional brightness value.
+  pub luminance: Option<u8>,
+  /// Fraction of the surface using the alternate color.
+  pub surface_fraction: f32,
+  /// Size of speckle grains.
+  pub size: GrainSize,
+}
+
+/// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
+/// [!COLOUR language extension](https://www.ldraw.org/article/299.html).
+#[derive(Debug, PartialEq)]
+pub struct ColourCmd {
+  /// Name of the color.
+  pub name: String,
+  /// Color code uniquely identifying this color. Codes 16 and 24 are reserved.
+  pub code: u32,
+  /// Primary value of the color.
+  pub value: Color,
+  /// Contrasting edge value of the color.
+  pub edge: Color,
+  /// Optional alpha (opacity) value.
+  pub alpha: Option<u8>,
+  /// Optional ["brightness for colors that glow"](https://www.ldraw.org/article/299.html#luminance).
+  pub luminance: Option<u8>,
+  /// Finish/texture of the object for high-fidelity rendering.
+  pub finish: Option<ColorFinish>
+}
+
 /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) comment.
 #[derive(Debug, PartialEq)]
 pub struct CommentCmd {
@@ -622,7 +916,7 @@ pub enum SubFileRef {
 #[derive(Debug, PartialEq)]
 pub struct SubFileRefCmd {
   /// Color code of the part.
-  pub color: i32,
+  pub color: u32,
   /// Position.
   pub pos: Vec3,
   /// First row of rotation+scaling matrix part.
@@ -640,7 +934,7 @@ pub struct SubFileRefCmd {
 #[derive(Debug, PartialEq)]
 pub struct LineCmd {
   /// Color code of the primitive.
-  pub color: i32,
+  pub color: u32,
   /// Vertices of the segment.
   pub vertices: [Vec3; 2]
 }
@@ -650,7 +944,7 @@ pub struct LineCmd {
 #[derive(Debug, PartialEq)]
 pub struct TriangleCmd {
   /// Color code of the primitive.
-  pub color: i32,
+  pub color: u32,
   /// Vertices of the triangle.
   pub vertices: [Vec3; 3]
 }
@@ -660,7 +954,7 @@ pub struct TriangleCmd {
 #[derive(Debug, PartialEq)]
 pub struct QuadCmd {
   /// Color code of the primitive.
-  pub color: i32,
+  pub color: u32,
   /// Vertices of the quad.
   pub vertices: [Vec3; 4]
 }
@@ -670,7 +964,7 @@ pub struct QuadCmd {
 #[derive(Debug, PartialEq)]
 pub struct OptLineCmd {
   /// Color code of the primitive.
-  pub color: i32,
+  pub color: u32,
   /// Vertices of the segment.
   pub vertices: [Vec3; 2],
   /// Control points of the segment.
@@ -686,6 +980,9 @@ pub enum CommandType {
   /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
   /// [!KEYWORDS language extension](https://www.ldraw.org/article/340.html#keywords).
   Keywords(KeywordsCmd),
+  /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
+  /// [!COLOUR language extension](https://www.ldraw.org/article/299.html).
+  Colour(ColourCmd),
   /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) comment.
   /// Note: any line type 0 not otherwise parsed as a known meta-command is parsed as a generic comment.
   Comment(CommentCmd),
@@ -727,7 +1024,224 @@ mod tests {
 
   #[test]
   fn test_color_id() {
+    assert_eq!(color_id(b""), Err(Err::Error((&b""[..], ErrorKind::Digit))));
+    assert_eq!(color_id(b"1"), Ok((&b""[..], 1)));
     assert_eq!(color_id(b"16 "), Ok((&b" "[..], 16)));
+  }
+
+  #[test]
+  fn test_hex_color() {
+    assert_eq!(hex_color(b""), Err(Err::Error((&b""[..], ErrorKind::Tag))));
+    assert_eq!(hex_color(b"#"), Err(Err::Error((&b""[..], ErrorKind::TakeWhileMN))));
+    assert_eq!(hex_color(b"#1"), Err(Err::Error((&b"1"[..], ErrorKind::TakeWhileMN))));
+    assert_eq!(hex_color(b"#12345Z"), Err(Err::Error((&b"5Z"[..], ErrorKind::TakeWhileMN))));
+    assert_eq!(hex_color(b"#123456"), Ok((&b""[..], Color{ red: 0x12, green: 0x34, blue: 0x56 })));
+    assert_eq!(hex_color(b"#ABCDEF"), Ok((&b""[..], Color{ red: 0xAB, green: 0xCD, blue: 0xEF })));
+    assert_eq!(hex_color(b"#8E5cAf"), Ok((&b""[..], Color{ red: 0x8E, green: 0x5C, blue: 0xAF })));
+    assert_eq!(hex_color(b"#123456e"), Ok((&b"e"[..], Color{ red: 0x12, green: 0x34, blue: 0x56 })));
+  }
+
+  #[test]
+  fn test_colour_alpha() {
+    assert_eq!(colour_alpha(b""), Ok((&b""[..], None)));
+    assert_eq!(colour_alpha(b" ALPHA 0"), Ok((&b""[..], Some(0))));
+    assert_eq!(colour_alpha(b" ALPHA 1"), Ok((&b""[..], Some(1))));
+    assert_eq!(colour_alpha(b" ALPHA 128"), Ok((&b""[..], Some(128))));
+    assert_eq!(colour_alpha(b" ALPHA 255"), Ok((&b""[..], Some(255))));
+    assert_eq!(colour_alpha(b" ALPHA 34 "), Ok((&b" "[..], Some(34))));
+    // TODO - Should fail on partial match, but succeeds because of opt!()
+    assert_eq!(colour_alpha(b" ALPHA"), Ok((&b" ALPHA"[..], None))); // Err(Err::Incomplete(Needed::Size(1)))
+    assert_eq!(colour_alpha(b" ALPHA 256"), Ok((&b" ALPHA 256"[..], None))); // Err(Err::Incomplete(Needed::Size(1)))
+  }
+
+  #[test]
+  fn test_colour_luminance() {
+    assert_eq!(colour_luminance(b""), Ok((&b""[..], None)));
+    assert_eq!(colour_luminance(b" LUMINANCE 0"), Ok((&b""[..], Some(0))));
+    assert_eq!(colour_luminance(b" LUMINANCE 1"), Ok((&b""[..], Some(1))));
+    assert_eq!(colour_luminance(b" LUMINANCE 128"), Ok((&b""[..], Some(128))));
+    assert_eq!(colour_luminance(b" LUMINANCE 255"), Ok((&b""[..], Some(255))));
+    assert_eq!(colour_luminance(b" LUMINANCE 34 "), Ok((&b" "[..], Some(34))));
+    // TODO - Should fail on partial match, but succeeds because of opt!()
+    assert_eq!(colour_luminance(b" LUMINANCE"), Ok((&b" LUMINANCE"[..], None))); // Err(Err::Incomplete(Needed::Size(1)))
+    assert_eq!(colour_luminance(b" LUMINANCE 256"), Ok((&b" LUMINANCE 256"[..], None))); // Err(Err::Incomplete(Needed::Size(1)))
+  }
+
+  #[test]
+  fn test_material_grain_size() {
+    assert_eq!(material_grain_size(b""), Err(Err::Incomplete(Needed::Size(4))));
+    assert_eq!(material_grain_size(b"SIZE"), Err(Err::Incomplete(Needed::Size(1))));
+    assert_eq!(material_grain_size(b"SIZE 1"), Ok((&b""[..], GrainSize::Size(1.0))));
+    assert_eq!(material_grain_size(b"SIZE 0.02"), Ok((&b""[..], GrainSize::Size(0.02))));
+    assert_eq!(material_grain_size(b"MINSIZE"), Err(Err::Incomplete(Needed::Size(1))));
+    assert_eq!(material_grain_size(b"MINSIZE 0.02"), Err(Err::Incomplete(Needed::Size(1))));
+    assert_eq!(material_grain_size(b"MINSIZE 0.02 MAXSIZE 0.04"), Ok((&b""[..], GrainSize::MinMaxSize((0.02, 0.04)))));
+  }
+
+  #[test]
+  fn test_glitter_material() {
+    assert_eq!(glitter_material(b""), Err(Err::Incomplete(Needed::Size(7))));
+    assert_eq!(glitter_material(b"GLITTER"), Err(Err::Incomplete(Needed::Size(1))));
+    assert_eq!(glitter_material(b"GLITTER VALUE #123456 FRACTION 1.0 VFRACTION 0.3 SIZE 1"), Ok((&b""[..],
+    ColorFinish::Material(MaterialFinish::Glitter(GlitterMaterial{
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      alpha: None,
+      luminance: None,
+      surface_fraction: 1.0,
+      volume_fraction: 0.3,
+      size: GrainSize::Size(1.0)
+    })))));
+    assert_eq!(glitter_material(b"GLITTER VALUE #123456 ALPHA 128 FRACTION 1.0 VFRACTION 0.3 SIZE 1"), Ok((&b""[..],
+    ColorFinish::Material(MaterialFinish::Glitter(GlitterMaterial{
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      alpha: Some(128),
+      luminance: None,
+      surface_fraction: 1.0,
+      volume_fraction: 0.3,
+      size: GrainSize::Size(1.0)
+    })))));
+    assert_eq!(glitter_material(b"GLITTER VALUE #123456 LUMINANCE 32 FRACTION 1.0 VFRACTION 0.3 SIZE 1"), Ok((&b""[..],
+    ColorFinish::Material(MaterialFinish::Glitter(GlitterMaterial{
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      alpha: None,
+      luminance: Some(32),
+      surface_fraction: 1.0,
+      volume_fraction: 0.3,
+      size: GrainSize::Size(1.0)
+    })))));
+    assert_eq!(glitter_material(b"GLITTER VALUE #123456 FRACTION 1.0 VFRACTION 0.3 MINSIZE 0.02 MAXSIZE 0.04"), Ok((&b""[..],
+    ColorFinish::Material(MaterialFinish::Glitter(GlitterMaterial{
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      alpha: None,
+      luminance: None,
+      surface_fraction: 1.0,
+      volume_fraction: 0.3,
+      size: GrainSize::MinMaxSize((0.02, 0.04))
+    })))));
+  }
+
+  #[test]
+  fn test_speckle_material() {
+    assert_eq!(speckle_material(b""), Err(Err::Incomplete(Needed::Size(7))));
+    assert_eq!(speckle_material(b"SPECKLE"), Err(Err::Incomplete(Needed::Size(1))));
+    assert_eq!(speckle_material(b"SPECKLE VALUE #123456 FRACTION 1.0 SIZE 1"), Ok((&b""[..],
+    ColorFinish::Material(MaterialFinish::Speckle(SpeckleMaterial{
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      alpha: None,
+      luminance: None,
+      surface_fraction: 1.0,
+      size: GrainSize::Size(1.0)
+    })))));
+    assert_eq!(speckle_material(b"SPECKLE VALUE #123456 ALPHA 128 FRACTION 1.0 SIZE 1"), Ok((&b""[..],
+    ColorFinish::Material(MaterialFinish::Speckle(SpeckleMaterial{
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      alpha: Some(128),
+      luminance: None,
+      surface_fraction: 1.0,
+      size: GrainSize::Size(1.0)
+    })))));
+    assert_eq!(speckle_material(b"SPECKLE VALUE #123456 LUMINANCE 32 FRACTION 1.0 SIZE 1"), Ok((&b""[..],
+    ColorFinish::Material(MaterialFinish::Speckle(SpeckleMaterial{
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      alpha: None,
+      luminance: Some(32),
+      surface_fraction: 1.0,
+      size: GrainSize::Size(1.0)
+    })))));
+    assert_eq!(speckle_material(b"SPECKLE VALUE #123456 FRACTION 1.0 MINSIZE 0.02 MAXSIZE 0.04"), Ok((&b""[..],
+    ColorFinish::Material(MaterialFinish::Speckle(SpeckleMaterial{
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      alpha: None,
+      luminance: None,
+      surface_fraction: 1.0,
+      size: GrainSize::MinMaxSize((0.02, 0.04))
+    })))));
+  }
+
+  #[test]
+  fn test_color_finish() {
+    assert_eq!(color_finish(b""), Ok((&b""[..], None)));
+    assert_eq!(color_finish(b"CHROME"), Ok((&b"CHROME"[..], None)));
+    assert_eq!(color_finish(b" CHROME"), Ok((&b""[..], Some(ColorFinish::Chrome))));
+    assert_eq!(color_finish(b" PEARLESCENT"), Ok((&b""[..], Some(ColorFinish::Pearlescent))));
+    assert_eq!(color_finish(b" RUBBER"), Ok((&b""[..], Some(ColorFinish::Rubber))));
+    assert_eq!(color_finish(b" MATTE_METALLIC"), Ok((&b""[..], Some(ColorFinish::MatteMetallic))));
+    assert_eq!(color_finish(b" METAL"), Ok((&b""[..], Some(ColorFinish::Metal))));
+    // TODO - Should probably ensure <SPACE> or <EOF> after keyword, not *anything*
+    assert_eq!(color_finish(b" CHROMEas"), Ok((&b"as"[..], Some(ColorFinish::Chrome))));
+    assert_eq!(color_finish(b" MATERIAL custom values"), Ok((&b""[..], Some(
+      ColorFinish::Material(MaterialFinish::Other("custom values".to_string()))
+    ))));
+  }
+
+  #[test]
+  fn test_digit1_as_u8() {
+    assert_eq!(digit1_as_u8(b""), Err(Err::Error((&b""[..], ErrorKind::Digit))));
+    assert_eq!(digit1_as_u8(b"0"), Ok((&b""[..], 0u8)));
+    assert_eq!(digit1_as_u8(b"1"), Ok((&b""[..], 1u8)));
+    assert_eq!(digit1_as_u8(b"255"), Ok((&b""[..], 255u8)));
+    assert_eq!(digit1_as_u8(b"256"), Err(Err::Error((&b"256"[..], ErrorKind::MapRes))));
+    assert_eq!(digit1_as_u8(b"32 "), Ok((&b" "[..], 32u8)));
+  }
+
+  #[test]
+  fn test_meta_colour() {
+    assert_eq!(meta_colour(b""), Err(Err::Incomplete(Needed::Size(7))));
+    assert_eq!(meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456"), Err(Err::Incomplete(Needed::Size(1))));
+    assert_eq!(meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef"), Ok((&b""[..], CommandType::Colour(ColourCmd{
+      name: "test_col".to_string(),
+      code: 20,
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      edge: Color{ red: 0xAB, green: 0xCD, blue: 0xEF },
+      alpha: None,
+      luminance: None,
+      finish: None
+    }))));
+    assert_eq!(meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef ALPHA 128"), Ok((&b""[..], CommandType::Colour(ColourCmd{
+      name: "test_col".to_string(),
+      code: 20,
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      edge: Color{ red: 0xAB, green: 0xCD, blue: 0xEF },
+      alpha: Some(128),
+      luminance: None,
+      finish: None
+    }))));
+    assert_eq!(meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef LUMINANCE 32"), Ok((&b""[..], CommandType::Colour(ColourCmd{
+      name: "test_col".to_string(),
+      code: 20,
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      edge: Color{ red: 0xAB, green: 0xCD, blue: 0xEF },
+      alpha: None,
+      luminance: Some(32),
+      finish: None
+    }))));
+    assert_eq!(meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef ALPHA 64 LUMINANCE 32"), Ok((&b""[..], CommandType::Colour(ColourCmd{
+      name: "test_col".to_string(),
+      code: 20,
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      edge: Color{ red: 0xAB, green: 0xCD, blue: 0xEF },
+      alpha: Some(64),
+      luminance: Some(32),
+      finish: None
+    }))));
+    assert_eq!(meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef CHROME"), Ok((&b""[..], CommandType::Colour(ColourCmd{
+      name: "test_col".to_string(),
+      code: 20,
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      edge: Color{ red: 0xAB, green: 0xCD, blue: 0xEF },
+      alpha: None,
+      luminance: None,
+      finish: Some(ColorFinish::Chrome)
+    }))));
+    assert_eq!(meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef ALPHA 128 RUBBER"), Ok((&b""[..], CommandType::Colour(ColourCmd{
+      name: "test_col".to_string(),
+      code: 20,
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      edge: Color{ red: 0xAB, green: 0xCD, blue: 0xEF },
+      alpha: Some(128),
+      luminance: None,
+      finish: Some(ColorFinish::Rubber)
+    }))));
   }
 
   #[test]
