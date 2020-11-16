@@ -201,6 +201,7 @@ named!(keywords<CommandType>,
   )
 );
 
+/// RGB color in sRGB color space.
 #[derive(Debug, PartialEq)]
 pub struct Color {
   pub red: u8,
@@ -239,7 +240,54 @@ named!(digit1_as_u8<u8>,
   )
 );
 
-named!(colour<CommandType>,
+// ALPHA part of !COLOUR
+named!(colour_alpha<Option<u8>>,
+  opt!(
+    complete!(
+      do_parse!(
+        sp >>
+        tag!(b"ALPHA") >>
+        sp >>
+        alpha: digit1_as_u8 >> (alpha)
+      )
+    )
+  )
+);
+
+// LUMINANCE part of !COLOUR
+named!(colour_luminance<Option<u8>>,
+  opt!(
+    complete!(
+      do_parse!(
+        sp >>
+        tag!(b"LUMINANCE") >>
+        sp >>
+        luminance: digit1_as_u8 >> (luminance)
+      )
+    )
+  )
+);
+
+// Ending part of !COLOUR
+named!(color_finish<Option<ColorFinish>>,
+  opt!(
+    complete!(
+      do_parse!(
+        sp >>
+        color_finish: alt!(
+          tag_no_case!(b"CHROME")         => { |_| ColorFinish::Chrome } |
+          tag_no_case!(b"PEARLESCENT")    => { |_| ColorFinish::Pearlescent } |
+          tag_no_case!(b"RUBBER")         => { |_| ColorFinish::Rubber } |
+          tag_no_case!(b"MATTE_METALLIC") => { |_| ColorFinish::MatteMetallic } |
+          tag_no_case!(b"METAL")          => { |_| ColorFinish::Metal }
+        ) >> (color_finish)
+      )
+    )
+  )
+);
+
+// !COLOUR extension meta-command
+named!(meta_colour<CommandType>,
   do_parse!(
     tag!(b"!COLOUR") >>
     sp >>
@@ -256,22 +304,9 @@ named!(colour<CommandType>,
     tag!(b"EDGE") >>
     sp >>
     edge: hex_color >>
-    alpha: opt!(
-      do_parse!(
-        sp >>
-        tag!(b"ALPHA") >>
-        sp >>
-        alpha: digit1_as_u8 >> (alpha)
-      )
-    ) >>
-    luminance: opt!(
-      do_parse!(
-        sp >>
-        tag!(b"LUMINANCE") >>
-        sp >>
-        luminance: digit1_as_u8 >> (luminance)
-      )
-    ) >> (
+    alpha: colour_alpha >>
+    luminance: colour_luminance >>
+    finish: color_finish >> (
       CommandType::Colour(ColourCmd{
         name: std::str::from_utf8(name).unwrap().to_string(),
         code,
@@ -279,7 +314,7 @@ named!(colour<CommandType>,
         edge,
         alpha,
         luminance,
-        finish: None
+        finish: finish
       })
     )
   )
@@ -294,7 +329,7 @@ named!(comment<CommandType>,
 );
 
 named!(meta_cmd<CommandType>,
-  alt!(category | keywords | colour | comment)
+  alt!(category | keywords | meta_colour | comment)
 );
 
 named!(sp<char>, char!(' '));
@@ -691,12 +726,19 @@ pub enum ColorFinish {
 /// [!COLOUR language extension](https://www.ldraw.org/article/299.html).
 #[derive(Debug, PartialEq)]
 pub struct ColourCmd {
+  /// Name of the color.
   pub name: String,
+  /// Color code uniquely identifying this color. Codes 16 and 24 are reserved.
   pub code: u32,
+  /// Primary value of the color.
   pub value: Color,
+  /// Contrasting edge value of the color.
   pub edge: Color,
+  /// Optional alpha (opacity) value.
   pub alpha: Option<u8>,
+  /// Optional ["brightness for colors that glow"](https://www.ldraw.org/article/299.html#luminance).
   pub luminance: Option<u8>,
+  /// Finish/texture of the object for high-fidelity rendering.
   pub finish: Option<ColorFinish>
 }
 
@@ -860,6 +902,45 @@ mod tests {
   }
 
   #[test]
+  fn test_colour_alpha() {
+    assert_eq!(colour_alpha(b""), Ok((&b""[..], None)));
+    assert_eq!(colour_alpha(b" ALPHA 0"), Ok((&b""[..], Some(0))));
+    assert_eq!(colour_alpha(b" ALPHA 1"), Ok((&b""[..], Some(1))));
+    assert_eq!(colour_alpha(b" ALPHA 128"), Ok((&b""[..], Some(128))));
+    assert_eq!(colour_alpha(b" ALPHA 255"), Ok((&b""[..], Some(255))));
+    assert_eq!(colour_alpha(b" ALPHA 34 "), Ok((&b" "[..], Some(34))));
+    // TODO - Should fail on partial match, but succeeds because of opt!()
+    assert_eq!(colour_alpha(b" ALPHA"), Ok((&b" ALPHA"[..], None))); // Err(Err::Incomplete(Needed::Size(1)))
+    assert_eq!(colour_alpha(b" ALPHA 256"), Ok((&b" ALPHA 256"[..], None))); // Err(Err::Incomplete(Needed::Size(1)))
+  }
+
+  #[test]
+  fn test_colour_luminance() {
+    assert_eq!(colour_luminance(b""), Ok((&b""[..], None)));
+    assert_eq!(colour_luminance(b" LUMINANCE 0"), Ok((&b""[..], Some(0))));
+    assert_eq!(colour_luminance(b" LUMINANCE 1"), Ok((&b""[..], Some(1))));
+    assert_eq!(colour_luminance(b" LUMINANCE 128"), Ok((&b""[..], Some(128))));
+    assert_eq!(colour_luminance(b" LUMINANCE 255"), Ok((&b""[..], Some(255))));
+    assert_eq!(colour_luminance(b" LUMINANCE 34 "), Ok((&b" "[..], Some(34))));
+    // TODO - Should fail on partial match, but succeeds because of opt!()
+    assert_eq!(colour_luminance(b" LUMINANCE"), Ok((&b" LUMINANCE"[..], None))); // Err(Err::Incomplete(Needed::Size(1)))
+    assert_eq!(colour_luminance(b" LUMINANCE 256"), Ok((&b" LUMINANCE 256"[..], None))); // Err(Err::Incomplete(Needed::Size(1)))
+  }
+
+  #[test]
+  fn test_color_finish() {
+    assert_eq!(color_finish(b""), Ok((&b""[..], None)));
+    assert_eq!(color_finish(b"CHROME"), Ok((&b"CHROME"[..], None)));
+    assert_eq!(color_finish(b" CHROME"), Ok((&b""[..], Some(ColorFinish::Chrome))));
+    assert_eq!(color_finish(b" PEARLESCENT"), Ok((&b""[..], Some(ColorFinish::Pearlescent))));
+    assert_eq!(color_finish(b" RUBBER"), Ok((&b""[..], Some(ColorFinish::Rubber))));
+    assert_eq!(color_finish(b" MATTE_METALLIC"), Ok((&b""[..], Some(ColorFinish::MatteMetallic))));
+    assert_eq!(color_finish(b" METAL"), Ok((&b""[..], Some(ColorFinish::Metal))));
+    // TODO - Should probably ensure <SPACE> or <EOF> after keyword, not *anything*
+    assert_eq!(color_finish(b" CHROMEas"), Ok((&b"as"[..], Some(ColorFinish::Chrome))));
+  }
+
+  #[test]
   fn test_digit1_as_u8() {
     assert_eq!(digit1_as_u8(b""), Err(Err::Error((&b""[..], ErrorKind::Digit))));
     assert_eq!(digit1_as_u8(b"0"), Ok((&b""[..], 0u8)));
@@ -870,9 +951,10 @@ mod tests {
   }
 
   #[test]
-  fn test_colour() {
-    assert_eq!(colour(b""), Err(Err::Incomplete(Needed::Size(7))));
-    assert_eq!(colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef"), Ok((&b""[..], CommandType::Colour(ColourCmd{
+  fn test_meta_colour() {
+    assert_eq!(meta_colour(b""), Err(Err::Incomplete(Needed::Size(7))));
+    assert_eq!(meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456"), Err(Err::Incomplete(Needed::Size(1))));
+    assert_eq!(meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef"), Ok((&b""[..], CommandType::Colour(ColourCmd{
       name: "test_col".to_string(),
       code: 20,
       value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
@@ -880,6 +962,51 @@ mod tests {
       alpha: None,
       luminance: None,
       finish: None
+    }))));
+    assert_eq!(meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef ALPHA 128"), Ok((&b""[..], CommandType::Colour(ColourCmd{
+      name: "test_col".to_string(),
+      code: 20,
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      edge: Color{ red: 0xAB, green: 0xCD, blue: 0xEF },
+      alpha: Some(128),
+      luminance: None,
+      finish: None
+    }))));
+    assert_eq!(meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef LUMINANCE 32"), Ok((&b""[..], CommandType::Colour(ColourCmd{
+      name: "test_col".to_string(),
+      code: 20,
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      edge: Color{ red: 0xAB, green: 0xCD, blue: 0xEF },
+      alpha: None,
+      luminance: Some(32),
+      finish: None
+    }))));
+    assert_eq!(meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef ALPHA 64 LUMINANCE 32"), Ok((&b""[..], CommandType::Colour(ColourCmd{
+      name: "test_col".to_string(),
+      code: 20,
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      edge: Color{ red: 0xAB, green: 0xCD, blue: 0xEF },
+      alpha: Some(64),
+      luminance: Some(32),
+      finish: None
+    }))));
+    assert_eq!(meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef CHROME"), Ok((&b""[..], CommandType::Colour(ColourCmd{
+      name: "test_col".to_string(),
+      code: 20,
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      edge: Color{ red: 0xAB, green: 0xCD, blue: 0xEF },
+      alpha: None,
+      luminance: None,
+      finish: Some(ColorFinish::Chrome)
+    }))));
+    assert_eq!(meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef ALPHA 128 RUBBER"), Ok((&b""[..], CommandType::Colour(ColourCmd{
+      name: "test_col".to_string(),
+      code: 20,
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      edge: Color{ red: 0xAB, green: 0xCD, blue: 0xEF },
+      alpha: Some(128),
+      luminance: None,
+      finish: Some(ColorFinish::Rubber)
     }))));
   }
 
