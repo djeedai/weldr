@@ -832,6 +832,8 @@ pub enum GrainSize {
   MinMaxSize((f32, f32))
 }
 
+/// Glitter material definition of a color definition
+/// ([!COLOUR language extension](https://www.ldraw.org/article/299.html)).
 #[derive(Debug, PartialEq)]
 pub struct GlitterMaterial {
   /// Primary color value of the material.
@@ -848,6 +850,8 @@ pub struct GlitterMaterial {
   pub size: GrainSize,
 }
 
+/// Speckle material definition of a color definition
+/// ([!COLOUR language extension](https://www.ldraw.org/article/299.html)).
 #[derive(Debug, PartialEq)]
 pub struct SpeckleMaterial {
   /// Primary color value of the material.
