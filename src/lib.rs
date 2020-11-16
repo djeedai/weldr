@@ -268,7 +268,99 @@ named!(colour_luminance<Option<u8>>,
   )
 );
 
-// Ending part of !COLOUR
+named!(material_grain_size<GrainSize>,
+  alt!(
+    do_parse!(
+      tag!(b"SIZE") >>
+      sp >>
+      size: float >> (GrainSize::Size(size))
+    ) |
+    do_parse!(
+      tag!(b"MINSIZE") >>
+      sp >>
+      min_size: float >>
+      sp >>
+      tag!(b"MAXSIZE") >>
+      sp >>
+      max_size: float >> (GrainSize::MinMaxSize((min_size, max_size)))
+    )
+  )
+);
+
+// GLITTER VALUE v [ALPHA a] [LUMINANCE l] FRACTION f VFRACTION vf (SIZE s | MINSIZE min MAXSIZE max)
+named!(glitter_material<ColorFinish>,
+  do_parse!(
+    tag_no_case!(b"GLITTER") >>
+    sp >>
+    tag_no_case!(b"VALUE") >>
+    sp >>
+    value: hex_color >>
+    alpha: colour_alpha >>
+    luminance: colour_luminance >>
+    sp >>
+    tag_no_case!(b"FRACTION") >>
+    sp >>
+    surface_fraction: float >>
+    sp >>
+    tag_no_case!(b"VFRACTION") >>
+    sp >>
+    volume_fraction: float >>
+    sp >>
+    grain_size: material_grain_size >>
+    (ColorFinish::Material(MaterialFinish::Glitter(GlitterMaterial{
+      value,
+      alpha,
+      luminance,
+      surface_fraction,
+      volume_fraction,
+      size: grain_size
+    })))
+  )
+);
+
+// SPECKLE VALUE v [ALPHA a] [LUMINANCE l] FRACTION f (SIZE s | MINSIZE min MAXSIZE max)
+named!(speckle_material<ColorFinish>,
+  do_parse!(
+    tag_no_case!(b"SPECKLE") >>
+    sp >>
+    tag_no_case!(b"VALUE") >>
+    sp >>
+    value: hex_color >>
+    alpha: colour_alpha >>
+    luminance: colour_luminance >>
+    sp >>
+    tag_no_case!(b"FRACTION") >>
+    sp >>
+    surface_fraction: float >>
+    sp >>
+    grain_size: material_grain_size >>
+    (ColorFinish::Material(MaterialFinish::Speckle(SpeckleMaterial{
+      value,
+      alpha,
+      luminance,
+      surface_fraction,
+      size: grain_size
+    })))
+  )
+);
+
+// Other unrecognized MATERIAL definition
+named!(other_material<ColorFinish>,
+  do_parse!(
+    raw_content: take_not_cr_or_lf >>
+    (ColorFinish::Material(MaterialFinish::Other(str::from_utf8(raw_content).unwrap().trim().to_string())))
+  )
+);
+
+// MATERIAL finish part of !COLOUR
+named!(material_finish<ColorFinish>,
+  do_parse!(
+    tag_no_case!(b"MATERIAL") >>
+    material_finish: alt!(glitter_material | speckle_material | other_material) >> (material_finish)
+  )
+);
+
+// Finish part of !COLOUR
 named!(color_finish<Option<ColorFinish>>,
   opt!(
     complete!(
@@ -279,7 +371,8 @@ named!(color_finish<Option<ColorFinish>>,
           tag_no_case!(b"PEARLESCENT")    => { |_| ColorFinish::Pearlescent } |
           tag_no_case!(b"RUBBER")         => { |_| ColorFinish::Rubber } |
           tag_no_case!(b"MATTE_METALLIC") => { |_| ColorFinish::MatteMetallic } |
-          tag_no_case!(b"METAL")          => { |_| ColorFinish::Metal }
+          tag_no_case!(b"METAL")          => { |_| ColorFinish::Metal } |
+          material_finish
         ) >> (color_finish)
       )
     )
@@ -719,7 +812,54 @@ pub enum ColorFinish {
   Rubber,
   MatteMetallic,
   Metal,
-  //Material(MaterialFinish) // TODO
+  Material(MaterialFinish)
+}
+
+/// Finish for optional MATERIAL part of color definition
+/// ([!COLOUR language extension](https://www.ldraw.org/article/299.html)).
+#[derive(Debug, PartialEq)]
+pub enum MaterialFinish {
+  Glitter(GlitterMaterial),
+  Speckle(SpeckleMaterial),
+  Other(String)
+}
+
+/// Grain size variants for the optional MATERIAL part of color definition
+/// ([!COLOUR language extension](https://www.ldraw.org/article/299.html)).
+#[derive(Debug, PartialEq)]
+pub enum GrainSize {
+  Size(f32),
+  MinMaxSize((f32, f32))
+}
+
+#[derive(Debug, PartialEq)]
+pub struct GlitterMaterial {
+  /// Primary color value of the material.
+  pub value: Color,
+  /// Optional alpha (opacity) value.
+  pub alpha: Option<u8>,
+  /// Optional brightness value.
+  pub luminance: Option<u8>,
+  /// Fraction of the surface using the alternate color.
+  pub surface_fraction: f32,
+  /// Fraction of the volume using the alternate color.
+  pub volume_fraction: f32,
+  /// Size of glitter grains.
+  pub size: GrainSize,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct SpeckleMaterial {
+  /// Primary color value of the material.
+  pub value: Color,
+  /// Optional alpha (opacity) value.
+  pub alpha: Option<u8>,
+  /// Optional brightness value.
+  pub luminance: Option<u8>,
+  /// Fraction of the surface using the alternate color.
+  pub surface_fraction: f32,
+  /// Size of speckle grains.
+  pub size: GrainSize,
 }
 
 /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
@@ -928,6 +1068,97 @@ mod tests {
   }
 
   #[test]
+  fn test_material_grain_size() {
+    assert_eq!(material_grain_size(b""), Err(Err::Incomplete(Needed::Size(4))));
+    assert_eq!(material_grain_size(b"SIZE"), Err(Err::Incomplete(Needed::Size(1))));
+    assert_eq!(material_grain_size(b"SIZE 1"), Ok((&b""[..], GrainSize::Size(1.0))));
+    assert_eq!(material_grain_size(b"SIZE 0.02"), Ok((&b""[..], GrainSize::Size(0.02))));
+    assert_eq!(material_grain_size(b"MINSIZE"), Err(Err::Incomplete(Needed::Size(1))));
+    assert_eq!(material_grain_size(b"MINSIZE 0.02"), Err(Err::Incomplete(Needed::Size(1))));
+    assert_eq!(material_grain_size(b"MINSIZE 0.02 MAXSIZE 0.04"), Ok((&b""[..], GrainSize::MinMaxSize((0.02, 0.04)))));
+  }
+
+  #[test]
+  fn test_glitter_material() {
+    assert_eq!(glitter_material(b""), Err(Err::Incomplete(Needed::Size(7))));
+    assert_eq!(glitter_material(b"GLITTER"), Err(Err::Incomplete(Needed::Size(1))));
+    assert_eq!(glitter_material(b"GLITTER VALUE #123456 FRACTION 1.0 VFRACTION 0.3 SIZE 1"), Ok((&b""[..],
+    ColorFinish::Material(MaterialFinish::Glitter(GlitterMaterial{
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      alpha: None,
+      luminance: None,
+      surface_fraction: 1.0,
+      volume_fraction: 0.3,
+      size: GrainSize::Size(1.0)
+    })))));
+    assert_eq!(glitter_material(b"GLITTER VALUE #123456 ALPHA 128 FRACTION 1.0 VFRACTION 0.3 SIZE 1"), Ok((&b""[..],
+    ColorFinish::Material(MaterialFinish::Glitter(GlitterMaterial{
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      alpha: Some(128),
+      luminance: None,
+      surface_fraction: 1.0,
+      volume_fraction: 0.3,
+      size: GrainSize::Size(1.0)
+    })))));
+    assert_eq!(glitter_material(b"GLITTER VALUE #123456 LUMINANCE 32 FRACTION 1.0 VFRACTION 0.3 SIZE 1"), Ok((&b""[..],
+    ColorFinish::Material(MaterialFinish::Glitter(GlitterMaterial{
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      alpha: None,
+      luminance: Some(32),
+      surface_fraction: 1.0,
+      volume_fraction: 0.3,
+      size: GrainSize::Size(1.0)
+    })))));
+    assert_eq!(glitter_material(b"GLITTER VALUE #123456 FRACTION 1.0 VFRACTION 0.3 MINSIZE 0.02 MAXSIZE 0.04"), Ok((&b""[..],
+    ColorFinish::Material(MaterialFinish::Glitter(GlitterMaterial{
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      alpha: None,
+      luminance: None,
+      surface_fraction: 1.0,
+      volume_fraction: 0.3,
+      size: GrainSize::MinMaxSize((0.02, 0.04))
+    })))));
+  }
+
+  #[test]
+  fn test_speckle_material() {
+    assert_eq!(speckle_material(b""), Err(Err::Incomplete(Needed::Size(7))));
+    assert_eq!(speckle_material(b"SPECKLE"), Err(Err::Incomplete(Needed::Size(1))));
+    assert_eq!(speckle_material(b"SPECKLE VALUE #123456 FRACTION 1.0 SIZE 1"), Ok((&b""[..],
+    ColorFinish::Material(MaterialFinish::Speckle(SpeckleMaterial{
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      alpha: None,
+      luminance: None,
+      surface_fraction: 1.0,
+      size: GrainSize::Size(1.0)
+    })))));
+    assert_eq!(speckle_material(b"SPECKLE VALUE #123456 ALPHA 128 FRACTION 1.0 SIZE 1"), Ok((&b""[..],
+    ColorFinish::Material(MaterialFinish::Speckle(SpeckleMaterial{
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      alpha: Some(128),
+      luminance: None,
+      surface_fraction: 1.0,
+      size: GrainSize::Size(1.0)
+    })))));
+    assert_eq!(speckle_material(b"SPECKLE VALUE #123456 LUMINANCE 32 FRACTION 1.0 SIZE 1"), Ok((&b""[..],
+    ColorFinish::Material(MaterialFinish::Speckle(SpeckleMaterial{
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      alpha: None,
+      luminance: Some(32),
+      surface_fraction: 1.0,
+      size: GrainSize::Size(1.0)
+    })))));
+    assert_eq!(speckle_material(b"SPECKLE VALUE #123456 FRACTION 1.0 MINSIZE 0.02 MAXSIZE 0.04"), Ok((&b""[..],
+    ColorFinish::Material(MaterialFinish::Speckle(SpeckleMaterial{
+      value: Color{ red: 0x12, green: 0x34, blue: 0x56 },
+      alpha: None,
+      luminance: None,
+      surface_fraction: 1.0,
+      size: GrainSize::MinMaxSize((0.02, 0.04))
+    })))));
+  }
+
+  #[test]
   fn test_color_finish() {
     assert_eq!(color_finish(b""), Ok((&b""[..], None)));
     assert_eq!(color_finish(b"CHROME"), Ok((&b"CHROME"[..], None)));
@@ -938,6 +1169,9 @@ mod tests {
     assert_eq!(color_finish(b" METAL"), Ok((&b""[..], Some(ColorFinish::Metal))));
     // TODO - Should probably ensure <SPACE> or <EOF> after keyword, not *anything*
     assert_eq!(color_finish(b" CHROMEas"), Ok((&b"as"[..], Some(ColorFinish::Chrome))));
+    assert_eq!(color_finish(b" MATERIAL custom values"), Ok((&b""[..], Some(
+      ColorFinish::Material(MaterialFinish::Other("custom values".to_string()))
+    ))));
   }
 
   #[test]
