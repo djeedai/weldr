@@ -22,8 +22,8 @@ jobs:
           - 1.44.0
 
         features:
-          - '--no-default-features'
-          - '--features "cgmath"'
+          - 'default'
+          - 'cgmath'
 
     steps:
     - name: Checkout
@@ -37,10 +37,16 @@ jobs:
         override: true
 
     - name: Build
-      run: cargo build --verbose ${{ matrix.features }}
+      uses: actions-rs/cargo@v1
+      with:
+        command: build
+        args: --verbose --no-default-features --features "${{ matrix.features }}"
 
     - name: Run tests
-      run: cargo test --verbose ${{ matrix.features }}
+      uses: actions-rs/cargo@v1
+      with:
+        command: test
+        args: --verbose --no-default-features --features "${{ matrix.features }}"
 
   coverage:
     name: Coverage
