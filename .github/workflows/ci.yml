@@ -99,7 +99,7 @@ jobs:
           command: doc
           args: --verbose --features "default"
 
-   fmt:
+  fmt:
     name: Check formatting
     runs-on: ubuntu-latest
 
