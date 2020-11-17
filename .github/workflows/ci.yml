@@ -23,7 +23,7 @@ jobs:
 
         features:
           - 'default'
-          - 'cgmath'
+          - ''
 
     steps:
     - name: Checkout
