@@ -2,15 +2,16 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, ci ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, ci ]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  test:
+    name: Test
     runs-on: ubuntu-latest
 
     strategy:
@@ -41,13 +42,28 @@ jobs:
     - name: Run tests
       run: cargo test --verbose ${{ matrix.features }}
 
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+
+    - name: Install rust (stable)
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
+        override: true
+
     - name: Install cargo-tarpaulin
       run: |
         RUST_BACKTRACE=1 cargo install --version 0.16.0 cargo-tarpaulin
 
     - name: Generate code coverage
       run: |
-        RUST_BACKTRACE=1 cargo tarpaulin --verbose --all-features --workspace --timeout 120 --out Lcov
+        RUST_BACKTRACE=1 cargo tarpaulin --verbose --workspace --timeout 120 --out Lcov --no-default-features --config tarpaulin.toml
         ls -la
 
     - name: Upload code coverage
@@ -55,3 +71,24 @@ jobs:
       with:
         path-to-lcov: './lcov.info'
         github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  doc:
+    name: Build documentation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install rust (stable)
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          command: doc
+          args: --verbose --features "default"
