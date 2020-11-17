@@ -109,6 +109,11 @@ pub use math::Vec3;
 #[cfg(feature = "cgmath")]
 pub type Vec3 = cgmath::Vector3<f32>;
 
+pub mod error;
+
+pub use error::ParseError;
+pub use error::ResolveError;
+
 // LDraw File Format Specification
 // https://www.ldraw.org/article/218.html
 
@@ -603,15 +608,12 @@ named!(
 ///       Vec3{ x: 1.0, y: 1.0, z: 1.0 }
 ///     ]
 ///   });
-///   assert_eq!(parse_raw(b"0 this is a comment\n2 16 0 0 0 1 1 1"), vec![cmd0, cmd1]);
+///   assert_eq!(parse_raw(b"0 this is a comment\n2 16 0 0 0 1 1 1"), Ok(vec![cmd0, cmd1]));
 /// }
 /// ```
-pub fn parse_raw(ldr_content: &[u8]) -> Vec<CommandType> {
+pub fn parse_raw(ldr_content: &[u8]) -> Result<Vec<CommandType>, ParseError> {
     // "An LDraw file consists of one command per line."
-    match many0(read_line)(ldr_content) {
-        Ok((_, cmds)) => cmds,
-        Err(_) => panic!("TODO - Error handling"),
-    }
+    many0(read_line)(ldr_content).map_or_else(|e| Err(ParseError::from(e)), |(_, cmds)| Ok(cmds))
 }
 
 struct QueuedFileRef {
@@ -710,17 +712,20 @@ fn resolve_file_refs(
     }
 }
 
-fn load_and_parse_single_file(filename: &str, resolver: &dyn FileRefResolver) -> SourceFile {
+fn load_and_parse_single_file(
+    filename: &str,
+    resolver: &dyn FileRefResolver,
+) -> Result<SourceFile, ParseError> {
     //match resolver.resolve(filename) {}
-    let raw_content = resolver.resolve(filename);
+    let raw_content = resolver.resolve(filename)?;
     let mut source_file = SourceFile {
         filename: filename.to_string(),
         raw_content,
         cmds: Vec::new(),
     };
-    let cmds = parse_raw(&source_file.raw_content[..]);
+    let cmds = parse_raw(&source_file.raw_content[..])?;
     source_file.cmds = cmds;
-    source_file
+    Ok(source_file)
 }
 
 /// Parse a single file and its sub-file references recursively.
@@ -731,35 +736,36 @@ fn load_and_parse_single_file(filename: &str, resolver: &dyn FileRefResolver) ->
 /// up populating the given `source_map`, which can be pre-populated manually or from a
 /// previous call with already loaded and parsed files.
 /// ```rust
-/// use weldr::{ FileRefResolver, parse };
+/// use weldr::{ FileRefResolver, parse, ResolveError };
 /// use std::collections::HashMap;
 ///
 /// struct MyCustomResolver {};
 ///
 /// impl FileRefResolver for MyCustomResolver {
-///   fn resolve(&self, filename: &str) -> Vec<u8> {
-///     vec![] // replace with custom impl
+///   fn resolve(&self, filename: &str) -> Result<Vec<u8>, ResolveError> {
+///     Ok(vec![]) // replace with custom impl
 ///   }
 /// }
 ///
-/// fn main() {
+/// fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///   let resolver = MyCustomResolver{};
 ///   let mut source_map = HashMap::new();
-///   let root_file = parse("root.ldr", &resolver, &mut source_map);
+///   let root_file = parse("root.ldr", &resolver, &mut source_map)?;
 ///   assert_eq!(root_file.borrow().filename, "root.ldr");
+///   Ok(())
 /// }
 /// ```
 pub fn parse(
     filename: &str,
     resolver: &dyn FileRefResolver,
     source_map: &mut HashMap<String, Rc<RefCell<SourceFile>>>,
-) -> Rc<RefCell<SourceFile>> {
+) -> Result<Rc<RefCell<SourceFile>>, ParseError> {
     if let Some(existing_file) = source_map.get(filename) {
-        return Rc::clone(existing_file);
+        return Ok(Rc::clone(existing_file));
     }
     let mut queue = ResolveQueue::new();
     println!("Loading root file: {}", filename);
-    let root_file = load_and_parse_single_file(filename, resolver);
+    let root_file = load_and_parse_single_file(filename, resolver)?;
     let root_file = Rc::new(RefCell::new(root_file));
     {
         println!(
@@ -777,7 +783,7 @@ pub fn parse(
             println!("Already parsed; reusing sub-file: {}", filename);
         } else {
             println!("Not yet parsed; parsing sub-file: {}", filename);
-            let source_file = load_and_parse_single_file(&filename[..], resolver);
+            let source_file = load_and_parse_single_file(&filename[..], resolver)?;
             let subfile = Rc::new(RefCell::new(source_file));
             println!(
                 "Post-loading resolving subfile refs of sub-file: {}",
@@ -796,7 +802,7 @@ pub fn parse(
             resolve_file_refs(queued_file.0.referer, &mut queue, source_map);
         }
     }
-    root_file
+    Ok(root_file)
 }
 
 /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
@@ -1981,7 +1987,7 @@ mod tests {
         });
         assert_eq!(
             parse_raw(b"0 this is a comment\n2 16 0 0 0 1 1 1"),
-            vec![cmd0, cmd1]
+            Ok(vec![cmd0, cmd1])
         );
 
         let cmd0 = CommandType::Comment(CommentCmd {
@@ -2013,7 +2019,7 @@ mod tests {
         });
         assert_eq!(
             parse_raw(b"\n0 this doesn't matter\n\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd"),
-            vec![cmd0, cmd1]
+            Ok(vec![cmd0, cmd1])
         );
 
         let cmd0 = CommandType::Comment(CommentCmd {
@@ -2047,7 +2053,7 @@ mod tests {
             parse_raw(
                 b"\r\n0 this doesn't \"matter\"\r\n\r\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd\n"
             ),
-            vec![cmd0, cmd1]
+            Ok(vec![cmd0, cmd1])
         );
 
         let cmd0 = CommandType::SubFileRef(SubFileRefCmd {
@@ -2102,7 +2108,7 @@ mod tests {
             parse_raw(
                 b"1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd"
             ),
-            vec![cmd0, cmd1]
+            Ok(vec![cmd0, cmd1])
         );
     }
 }
