@@ -10,7 +10,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  test:
+    name: Test
     runs-on: ubuntu-latest
 
     strategy:
@@ -21,8 +22,8 @@ jobs:
           - 1.44.0
 
         features:
-          - '--no-default-features'
-          - '--features "cgmath"'
+          - 'default'
+          - ''
 
     steps:
     - name: Checkout
@@ -36,10 +37,31 @@ jobs:
         override: true
 
     - name: Build
-      run: cargo build --verbose ${{ matrix.features }}
+      uses: actions-rs/cargo@v1
+      with:
+        command: build
+        args: --verbose --no-default-features --features "${{ matrix.features }}"
 
     - name: Run tests
-      run: cargo test --verbose ${{ matrix.features }}
+      uses: actions-rs/cargo@v1
+      with:
+        command: test
+        args: --verbose --no-default-features --features "${{ matrix.features }}"
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+
+    - name: Install rust (stable)
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
+        override: true
 
     - name: Install cargo-tarpaulin
       run: |
@@ -47,7 +69,7 @@ jobs:
 
     - name: Generate code coverage
       run: |
-        RUST_BACKTRACE=1 cargo tarpaulin --verbose --all-features --workspace --timeout 120 --out Lcov
+        RUST_BACKTRACE=1 cargo tarpaulin --verbose --workspace --timeout 120 --out Lcov --no-default-features --config tarpaulin.toml
         ls -la
 
     - name: Upload code coverage
@@ -55,3 +77,24 @@ jobs:
       with:
         path-to-lcov: './lcov.info'
         github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  doc:
+    name: Build documentation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install rust (stable)
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          command: doc
+          args: --verbose --features "default"
