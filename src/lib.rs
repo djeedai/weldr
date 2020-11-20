@@ -111,8 +111,7 @@ pub type Vec3 = cgmath::Vector3<f32>;
 
 pub mod error;
 
-pub use error::ParseError;
-pub use error::ResolveError;
+pub use error::{Error, ParseError, ResolveError};
 
 // LDraw File Format Specification
 // https://www.ldraw.org/article/218.html
@@ -608,12 +607,15 @@ named!(
 ///       Vec3{ x: 1.0, y: 1.0, z: 1.0 }
 ///     ]
 ///   });
-///   assert_eq!(parse_raw(b"0 this is a comment\n2 16 0 0 0 1 1 1"), Ok(vec![cmd0, cmd1]));
+///   assert_eq!(parse_raw(b"0 this is a comment\n2 16 0 0 0 1 1 1").unwrap(), vec![cmd0, cmd1]);
 /// }
 /// ```
-pub fn parse_raw(ldr_content: &[u8]) -> Result<Vec<CommandType>, ParseError> {
+pub fn parse_raw(ldr_content: &[u8]) -> Result<Vec<CommandType>, Error> {
     // "An LDraw file consists of one command per line."
-    many0(read_line)(ldr_content).map_or_else(|e| Err(ParseError::from(e)), |(_, cmds)| Ok(cmds))
+    many0(read_line)(ldr_content).map_or_else(
+        |e| Err(Error::Parse(ParseError::new_from_nom("", &e))),
+        |(_, cmds)| Ok(cmds),
+    )
 }
 
 struct QueuedFileRef {
@@ -715,7 +717,7 @@ fn resolve_file_refs(
 fn load_and_parse_single_file(
     filename: &str,
     resolver: &dyn FileRefResolver,
-) -> Result<SourceFile, ParseError> {
+) -> Result<SourceFile, Error> {
     //match resolver.resolve(filename) {}
     let raw_content = resolver.resolve(filename)?;
     let mut source_file = SourceFile {
@@ -759,7 +761,7 @@ pub fn parse(
     filename: &str,
     resolver: &dyn FileRefResolver,
     source_map: &mut HashMap<String, Rc<RefCell<SourceFile>>>,
-) -> Result<Rc<RefCell<SourceFile>>, ParseError> {
+) -> Result<Rc<RefCell<SourceFile>>, Error> {
     if let Some(existing_file) = source_map.get(filename) {
         return Ok(Rc::clone(existing_file));
     }
@@ -1035,7 +1037,7 @@ pub trait FileRefResolver {
     /// Unix style `\n` or Windows style `\r\n`.
     ///
     /// See [`parse`] for usage.
-    fn resolve(&self, filename: &str) -> Vec<u8>;
+    fn resolve(&self, filename: &str) -> Result<Vec<u8>, ResolveError>;
 }
 
 #[cfg(test)]
@@ -1986,8 +1988,8 @@ mod tests {
             ],
         });
         assert_eq!(
-            parse_raw(b"0 this is a comment\n2 16 0 0 0 1 1 1"),
-            Ok(vec![cmd0, cmd1])
+            parse_raw(b"0 this is a comment\n2 16 0 0 0 1 1 1").unwrap(),
+            vec![cmd0, cmd1]
         );
 
         let cmd0 = CommandType::Comment(CommentCmd {
@@ -2018,8 +2020,9 @@ mod tests {
             file: SubFileRef::UnresolvedRef("aa/aaaaddd".to_string()),
         });
         assert_eq!(
-            parse_raw(b"\n0 this doesn't matter\n\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd"),
-            Ok(vec![cmd0, cmd1])
+            parse_raw(b"\n0 this doesn't matter\n\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd")
+                .unwrap(),
+            vec![cmd0, cmd1]
         );
 
         let cmd0 = CommandType::Comment(CommentCmd {
@@ -2052,8 +2055,9 @@ mod tests {
         assert_eq!(
             parse_raw(
                 b"\r\n0 this doesn't \"matter\"\r\n\r\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd\n"
-            ),
-            Ok(vec![cmd0, cmd1])
+            )
+            .unwrap(),
+            vec![cmd0, cmd1]
         );
 
         let cmd0 = CommandType::SubFileRef(SubFileRefCmd {
@@ -2107,8 +2111,9 @@ mod tests {
         assert_eq!(
             parse_raw(
                 b"1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd"
-            ),
-            Ok(vec![cmd0, cmd1])
+            )
+            .unwrap(),
+            vec![cmd0, cmd1]
         );
     }
 }

@@ -44,9 +44,7 @@ impl FileRefResolver for MemoryResolver {
     fn resolve(&self, filename: &str) -> Result<Vec<u8>, ResolveError> {
         match self.file_map.get(filename) {
             Some(file) => Ok(file.clone()),
-            None => Err(ResolveError {
-                filename: filename.to_string(),
-            }),
+            None => Err(ResolveError::new_raw(filename)),
         }
     }
 }
