@@ -1,0 +1,32 @@
+[package]
+name = "weldr-bin"
+version = "0.0.1"
+authors = ["Jerome Humbert"]
+description = "A tool to manipulate LDraw files (.ldr)"
+license = "MIT"
+repository = "https://github.com/djeedai/weldr"
+readme = "README.md"
+documentation = "https://docs.rs/weldr-bin"
+keywords = ["convert", "ldraw", "lego", "cad"]
+categories = ["command-line-utilities", "multimedia::encoding"]
+edition = "2018"
+include = [
+  "CHANGELOG.md",
+  "LICENSE",
+  "README.md",
+  ".gitignore",
+  "Cargo.toml",
+  "src/bin/weldr/*.rs",
+  "tests/bin/weldr/*.rs"
+]
+
+[[bin]]
+name = "weldr"
+path = "weldr.rs"
+
+[dependencies]
+weldr = { path = "../../lib" }
+clap = "2.33"
+structopt = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
