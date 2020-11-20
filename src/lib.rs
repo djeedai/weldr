@@ -584,7 +584,7 @@ named!(
 
 /// Parse raw LDR content without sub-file resolution.
 ///
-/// Parse the given LDR data passed in [`ldr_content`] and return the list of parsed commands.
+/// Parse the given LDR data passed in `ldr_content` and return the list of parsed commands.
 /// Sub-file references (Line Type 1) are not resolved, and returned as [`SubFileRef::UnresolvedRef`].
 ///
 /// The input LDR content must comply to the LDraw standard. In particular this means:
@@ -1015,10 +1015,10 @@ pub enum CommandType {
 
 /// Resolver trait for sub-file references ([Line Type 1](https://www.ldraw.org/article/218.html#lt1) LDraw command).
 ///
-/// An implementation of this trait must be passed to [`parse()`](weldr::parse) to allow resolving sub-file
-/// references recursively, and parsing all dependent sub-files of the top-level file being parsed. Implementations
-/// are free to decide how to retrieve the file, but must ensure that all canonical paths are in scope, as sub-file
-/// references can be relative to any of those:
+/// An implementation of this trait must be passed to [`parse`] to allow resolving sub-file references recursively,
+/// and parsing all dependent sub-files of the top-level file being parsed. Implementations are free to decide how to
+/// retrieve the file, but must ensure that all canonical paths are in scope, as sub-file references can be relative
+/// to any of those:
 /// - `/p/`       - Parts primitives
 /// - `/p/48/`    - High-resolution primitives
 /// - `/parts/`   - Main catalog of parts
@@ -1028,7 +1028,7 @@ pub trait FileRefResolver {
     /// the content of the file as a UTF-8 encoded buffer of bytes, without BOM. Line ending can be indifferently
     /// Unix style `\n` or Windows style `\r\n`.
     ///
-    /// See [`parse()`](weldr::parse) for usage.
+    /// See [`parse`] for usage.
     fn resolve(&self, filename: &str) -> Vec<u8>;
 }
 
