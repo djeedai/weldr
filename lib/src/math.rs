@@ -5,6 +5,7 @@
 /// With the `cgmath` feature (default), this is an alias to `cgmath::Vector3<f32>`.
 /// Without it, the `Vec3` type is defined as a built-in struct with basic operations overloaded.
 #[derive(Debug, Copy, Clone, PartialEq)]
+#[repr(C)]
 pub struct Vec3 {
     pub x: f32,
     pub y: f32,

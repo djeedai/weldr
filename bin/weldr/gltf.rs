@@ -1,6 +1,10 @@
 //! GLTF writer.
 
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
+use serde_repr::{Deserialize_repr, Serialize_repr};
+use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize)]
 pub struct Gltf {
@@ -15,8 +19,18 @@ pub struct Gltf {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub buffers: Vec<Buffer>,
 
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(rename(serialize = "bufferViews"))]
+    pub buffer_views: Vec<BufferView>,
+
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub accessors: Vec<Accessor>,
+
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub meshes: Vec<Mesh>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub scene: Option<u32>
+    pub scene: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -41,18 +55,19 @@ pub struct Scene {
 
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub nodes: Vec<u32>,
-
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub buffers: Vec<Buffer>
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct Node {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    
+
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<u32>,
+
+    #[serde(rename(serialize = "mesh"))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mesh_index: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -62,7 +77,7 @@ pub struct Buffer {
 
     #[serde(rename(serialize = "byteLength"))]
     pub byte_length: u32,
-    
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uri: Option<String>,
 }
@@ -95,18 +110,53 @@ fn is_false(value: &bool) -> bool {
     *value == false
 }
 
+#[derive(Serialize_repr, Deserialize_repr, PartialEq, Debug, Clone, Copy)]
+#[repr(u32)]
+pub enum ComponentType {
+    Byte = 5120,
+    UnsignedByte = 5121,
+    Short = 5122,
+    UnsignedShort = 5123,
+    UnsignedInt = 5125,
+    Float = 5126,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy)]
+pub enum AttributeType {
+    #[serde(rename(serialize = "SCALAR"))]
+    Scalar,
+
+    #[serde(rename(serialize = "VEC2"))]
+    Vec2,
+
+    #[serde(rename(serialize = "VEC3"))]
+    Vec3,
+
+    #[serde(rename(serialize = "VEC4"))]
+    Vec4,
+
+    #[serde(rename(serialize = "MAT2"))]
+    Mat2,
+
+    #[serde(rename(serialize = "MAT3"))]
+    Mat3,
+
+    #[serde(rename(serialize = "MAT4"))]
+    Mat4,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct Accessor {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 
     #[serde(rename(serialize = "componentType"))]
-    pub component_type: u32,
+    pub component_type: ComponentType,
 
     pub count: u32,
 
     #[serde(rename(serialize = "type"))]
-    pub attribute_type: String,
+    pub attribute_type: AttributeType,
 
     #[serde(rename(serialize = "bufferView"))]
     pub buffer_view_index: u32,
@@ -119,6 +169,36 @@ pub struct Accessor {
     pub normalized: bool, // optional, but defaults to false
 }
 
+#[derive(Serialize_repr, Deserialize_repr, PartialEq, Debug)]
+#[repr(u8)]
+pub enum PrimitiveMode {
+    Points = 0,
+    Lines = 1,
+    LineLoop = 2,
+    LineStrip = 3,
+    Triangles = 4,
+    TriangleStrip = 5,
+    TriangleFan = 6,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Primitive {
+    pub attributes: HashMap<String, u32>,
+
+    #[serde(skip_serializing_if = "is_zero")]
+    pub indices: u32, // optional, but defaults to zero
+
+    pub mode: PrimitiveMode,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Mesh {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+
+    pub primitives: Vec<Primitive>,
+}
+
 impl Gltf {
     pub fn new(asset: Asset) -> Gltf {
         Gltf {
@@ -126,7 +206,17 @@ impl Gltf {
             nodes: vec![],
             scenes: vec![],
             buffers: vec![],
-            scene: None
+            buffer_views: vec![],
+            accessors: vec![],
+            meshes: vec![],
+            scene: None,
+        }
+    }
+
+    pub fn add_scene(&mut self, scene: Scene) {
+        self.scenes.push(scene);
+        if self.scene == None {
+            self.scene = Some(0);
         }
     }
 }
@@ -137,7 +227,7 @@ impl Asset {
             version: version.to_string(),
             min_version: None,
             generator: None,
-            copyright: None
+            copyright: None,
         }
     }
 
@@ -169,19 +259,33 @@ mod tests {
     fn root() {
         let asset = Asset::new("2.0");
         let gltf = Gltf::new(asset);
-        assert_eq!(serde_json::to_string(&gltf).unwrap(), "{\"asset\":{\"version\":\"2.0\"}}".to_string());
+        assert_eq!(
+            serde_json::to_string(&gltf).unwrap(),
+            "{\"asset\":{\"version\":\"2.0\"}}".to_string()
+        );
     }
 
     #[test]
     fn asset() {
         let asset = Asset::new("2.0");
-        assert_eq!(serde_json::to_string(&asset).unwrap(), "{\"version\":\"2.0\"}".to_string());
+        assert_eq!(
+            serde_json::to_string(&asset).unwrap(),
+            "{\"version\":\"2.0\"}".to_string()
+        );
         let asset = Asset::new("2.0").generator("weldr");
-        assert_eq!(serde_json::to_string(&asset).unwrap(), "{\"version\":\"2.0\",\"generator\":\"weldr\"}".to_string());
+        assert_eq!(
+            serde_json::to_string(&asset).unwrap(),
+            "{\"version\":\"2.0\",\"generator\":\"weldr\"}".to_string()
+        );
         let asset = Asset::new("2.0").min_version("1.0");
-        assert_eq!(serde_json::to_string(&asset).unwrap(), "{\"version\":\"2.0\",\"minVersion\":\"1.0\"}".to_string());
+        assert_eq!(
+            serde_json::to_string(&asset).unwrap(),
+            "{\"version\":\"2.0\",\"minVersion\":\"1.0\"}".to_string()
+        );
         let asset = Asset::new("2.0").copyright("(c) weldr");
-        assert_eq!(serde_json::to_string(&asset).unwrap(), "{\"version\":\"2.0\",\"copyright\":\"(c) weldr\"}".to_string());
+        assert_eq!(
+            serde_json::to_string(&asset).unwrap(),
+            "{\"version\":\"2.0\",\"copyright\":\"(c) weldr\"}".to_string()
+        );
     }
-
 }
