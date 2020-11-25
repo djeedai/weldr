@@ -14,10 +14,9 @@ include = [
   "CHANGELOG.md",
   "LICENSE",
   "README.md",
-  ".gitignore",
+  "../../.gitignore",
   "Cargo.toml",
-  "src/bin/weldr/*.rs",
-  "tests/bin/weldr/*.rs"
+  "*.rs",
 ]
 
 [[bin]]
@@ -25,7 +24,7 @@ name = "weldr"
 path = "weldr.rs"
 
 [dependencies]
-weldr = { path = "../../lib" }
+weldr = { version = "0.2", path = "../../lib" }
 ansi_term = "0.12"
 clap = "2.33"
 structopt = "0.3"

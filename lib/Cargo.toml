@@ -14,7 +14,7 @@ include = [
   "CHANGELOG.md",
   "LICENSE",
   "README.md",
-  ".gitignore",
+  "../.gitignore",
   "Cargo.toml",
   "src/*.rs",
   "tests/*.rs"
