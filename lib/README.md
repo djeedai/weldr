@@ -1,4 +1,4 @@
-# weldr, the link between your favorite building blocks and Rust
+# 👨‍🏭 weldr, the link between your favorite building blocks and Rust 🧱
 
 [![LICENSE](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Crates.io Version](https://img.shields.io/crates/v/weldr.svg)](https://crates.io/crates/weldr)
@@ -6,13 +6,15 @@
 [![Coverage Status](https://coveralls.io/repos/github/djeedai/weldr/badge.svg?branch=main)](https://coveralls.io/github/djeedai/weldr?branch=main)
 [![Minimum rustc version](https://img.shields.io/badge/rustc-1.44.0+-lightgray.svg)](#rust-version-requirements)
 
-weldr is a Rust library to manipulate [LDraw](https://www.ldraw.org/) files ([format specification](https://www.ldraw.org/article/218.html)), which are files describing 3D models of [LEGO®](http://www.lego.com)* pieces.
+weldr is a Rust library and command-line tool to manipulate [LDraw](https://www.ldraw.org/) files ([format specification](https://www.ldraw.org/article/218.html)), which are files describing 3D models of [LEGO®](http://www.lego.com)* pieces.
 
-weldr allows building command-line tools and applications leveraging [the fantastic database of pieces](https://www.ldraw.org/cgi-bin/ptlist.cgi) contributed by the LDraw community.
+The **[📦 `weldr`](https://crates.io/crates/weldr) crate** contains the library which allows building command-line tools and applications leveraging [the fantastic database of pieces](https://www.ldraw.org/cgi-bin/ptlist.cgi) contributed by the LDraw community.
+
+_Note: For the binary command-line tool ⚙ `weldr`, see the [📦 `weldr-bin` crate](https://crates.io/crates/weldr-bin) instead._
 
 ## Example
 
-Parse a single `.ldr` file containing 2 commands:
+Use the `weldr` crate to parse the content of a single LDraw file containing 2 commands:
 
 ```rust
 extern crate weldr;
