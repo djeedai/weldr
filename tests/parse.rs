@@ -61,6 +61,18 @@ fn get_resolved_subfile_ref(cmd: &CommandType) -> Option<Rc<RefCell<SourceFile>>
 }
 
 #[test]
+fn test_memory_resolver() {
+    let mut memory_resolver = MemoryResolver::new();
+    memory_resolver.add("root.ldr", b"1 16 0 0 0 1 0 0 0 1 0 0 0 1 a.ldr");
+    assert!(memory_resolver.resolve("root.ldr").is_ok());
+    assert!(memory_resolver.resolve("a.ldr").is_err());
+    assert_eq!(
+        "a.ldr",
+        memory_resolver.resolve("a.ldr").unwrap_err().filename
+    );
+}
+
+#[test]
 fn parse_recursive() {
     let mut memory_resolver = MemoryResolver::new();
     memory_resolver.add("root.ldr", b"1 16 0 0 0 1 0 0 0 1 0 0 0 1 a.ldr\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 b.ldr\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 a.ldr");
