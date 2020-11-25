@@ -147,7 +147,8 @@ mod tests {
 
     #[test]
     fn test_new_from_nom() {
-        let nom_error: nom::Err<(&[u8], nom::error::ErrorKind)> = nom::Err::Error((&b""[..], nom::error::ErrorKind::Alpha));
+        let nom_error: nom::Err<(&[u8], nom::error::ErrorKind)> =
+            nom::Err::Error((&b""[..], nom::error::ErrorKind::Alpha));
         let parse_error = ParseError::new_from_nom("file", &nom_error);
         assert_eq!(parse_error.filename, "file");
         assert!(parse_error.parse_error.is_some());
@@ -156,26 +157,26 @@ mod tests {
     #[test]
     fn test_source() {
         let resolve_error = ResolveError::new_raw("file");
-        let error : Error = resolve_error.into();
+        let error: Error = resolve_error.into();
         assert!(std::error::Error::source(&error).is_none());
     }
 
     #[test]
     fn test_from() {
         let resolve_error = ResolveError::new_raw("file");
-        let error : Error = resolve_error.into();
+        let error: Error = resolve_error.into();
         println!("err: {}", error);
         match &error {
             Error::Resolve(resolve_error) => assert_eq!(resolve_error.filename, "file"),
-            _ => panic!("Unexpected error type.")
+            _ => panic!("Unexpected error type."),
         }
 
         let parse_error = ParseError::new("file", error);
-        let error : Error = parse_error.into();
+        let error: Error = parse_error.into();
         println!("err: {}", error);
         match &error {
             Error::Parse(parse_error) => assert_eq!(parse_error.filename, "file"),
-            _ => panic!("Unexpected error type.")
+            _ => panic!("Unexpected error type."),
         }
     }
 }
