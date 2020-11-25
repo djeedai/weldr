@@ -16,12 +16,12 @@ include = [
   "README.md",
   "../../.gitignore",
   "Cargo.toml",
-  "*.rs",
+  "src/*.rs",
 ]
 
 [[bin]]
 name = "weldr"
-path = "weldr.rs"
+path = "src/weldr.rs"
 
 [dependencies]
 weldr = { version = "0.2", path = "../../lib" }
