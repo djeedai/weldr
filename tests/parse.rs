@@ -1,6 +1,6 @@
 extern crate weldr;
 
-use weldr::{CommandType, FileRefResolver, SourceFile, SubFileRef};
+use weldr::{error::ResolveError, CommandType, FileRefResolver, SourceFile, SubFileRef};
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
@@ -41,8 +41,11 @@ impl MemoryResolver {
 }
 
 impl FileRefResolver for MemoryResolver {
-    fn resolve(&self, filename: &str) -> Vec<u8> {
-        self.file_map.get(filename).unwrap().clone()
+    fn resolve(&self, filename: &str) -> Result<Vec<u8>, ResolveError> {
+        match self.file_map.get(filename) {
+            Some(file) => Ok(file.clone()),
+            None => Err(ResolveError::new_raw(filename)),
+        }
     }
 }
 
@@ -58,6 +61,18 @@ fn get_resolved_subfile_ref(cmd: &CommandType) -> Option<Rc<RefCell<SourceFile>>
 }
 
 #[test]
+fn test_memory_resolver() {
+    let mut memory_resolver = MemoryResolver::new();
+    memory_resolver.add("root.ldr", b"1 16 0 0 0 1 0 0 0 1 0 0 0 1 a.ldr");
+    assert!(memory_resolver.resolve("root.ldr").is_ok());
+    assert!(memory_resolver.resolve("a.ldr").is_err());
+    assert_eq!(
+        "a.ldr",
+        memory_resolver.resolve("a.ldr").unwrap_err().filename
+    );
+}
+
+#[test]
 fn parse_recursive() {
     let mut memory_resolver = MemoryResolver::new();
     memory_resolver.add("root.ldr", b"1 16 0 0 0 1 0 0 0 1 0 0 0 1 a.ldr\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 b.ldr\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 a.ldr");
@@ -67,7 +82,7 @@ fn parse_recursive() {
         b"4 16 1 1 0 0.9239 1 0.3827 0.9239 0 0.3827 1 0 0\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 a.ldr",
     );
     let mut source_map = HashMap::new();
-    let root_file = weldr::parse("root.ldr", &memory_resolver, &mut source_map);
+    let root_file = weldr::parse("root.ldr", &memory_resolver, &mut source_map).unwrap();
     let root_file = &root_file.borrow();
     assert_eq!(3, root_file.cmds.len());
     let file0 = &get_resolved_subfile_ref(&root_file.cmds[0]).unwrap();
