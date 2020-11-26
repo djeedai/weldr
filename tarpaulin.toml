@@ -1,9 +1,9 @@
 [default_coverage]
-no-default-features = "true"
+no-default-features = true
 features = "default"
 
 [builtin_math_coverage]
-no-default-features = "true"
+no-default-features = true
 features = ""
 
 [report]
