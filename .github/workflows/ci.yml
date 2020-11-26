@@ -73,15 +73,15 @@ jobs:
       run: |
         RUST_BACKTRACE=1 cargo install --version 0.16.0 cargo-tarpaulin
 
-    - name: Generate code coverage (lib)
+    - name: Generate code coverage
       run: |
-        RUST_BACKTRACE=1 cargo tarpaulin --verbose --workspace --timeout 120 --out Lcov --config ../tarpaulin.toml
+        RUST_BACKTRACE=1 cargo tarpaulin --verbose --workspace --timeout 120 --out Lcov --config ./tarpaulin.toml
         ls -la
 
-    - name: Upload code coverage (lib)
+    - name: Upload code coverage
       uses: coverallsapp/github-action@master
       with:
-        path-to-lcov: 'lib/lcov.info'
+        path-to-lcov: './lcov.info'
         github-token: ${{ secrets.GITHUB_TOKEN }}
 
   doc:
