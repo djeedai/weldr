@@ -1,10 +1,15 @@
 [default_coverage]
+manifest-path = "lib/Cargo.toml"
 no-default-features = true
 features = "default"
 
 [builtin_math_coverage]
+manifest-path = "lib/Cargo.toml"
 no-default-features = true
 features = ""
+
+[weldr_bin]
+manifest-path = "bin/weldr/Cargo.toml"
 
 [report]
 out = ["Lcov"]
