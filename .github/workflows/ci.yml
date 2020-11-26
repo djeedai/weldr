@@ -36,17 +36,23 @@ jobs:
         profile: minimal
         override: true
 
-    - name: Build
+    - name: Build lib
       uses: actions-rs/cargo@v1
       with:
         command: build
-        args: --verbose --no-default-features --features "${{ matrix.features }}"
+        args: --manifest-path lib/Cargo.toml --verbose --no-default-features --features "${{ matrix.features }}"
 
-    - name: Run tests
+    - name: Build bin/weldr
+      uses: actions-rs/cargo@v1
+      with:
+        command: build
+        args: --manifest-path bin/weldr/Cargo.toml --verbose
+
+    - name: Run lib tests
       uses: actions-rs/cargo@v1
       with:
         command: test
-        args: --verbose --no-default-features --features "${{ matrix.features }}"
+        args: --manifest-path lib/Cargo.toml --verbose --no-default-features --features "${{ matrix.features }}"
 
   coverage:
     name: Coverage
@@ -93,11 +99,11 @@ jobs:
           profile: minimal
           override: true
 
-      - name: Build
+      - name: Doc lib
         uses: actions-rs/cargo@v1
         with:
           command: doc
-          args: --verbose --features "default"
+          args: --manifest-path lib/Cargo.toml --verbose --features "default"
 
   fmt:
     name: Check formatting
