@@ -75,7 +75,7 @@ jobs:
 
     - name: Generate code coverage
       run: |
-        RUST_BACKTRACE=1 cargo tarpaulin --verbose --workspace --timeout 120 --out Lcov --config ./tarpaulin.toml
+        RUST_BACKTRACE=1 cargo tarpaulin --verbose --timeout 120 --out Lcov --config ./tarpaulin.toml
         ls -la
 
     - name: Upload code coverage
