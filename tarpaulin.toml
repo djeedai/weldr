@@ -1,9 +1,9 @@
 [default_coverage]
-manifest-path lib/Cargo.toml
+manifest-path = "lib/Cargo.toml"
 features = "default"
 
 [builtin_math_coverage]
-manifest-path lib/Cargo.toml
+manifest-path = "lib/Cargo.toml"
 features = ""
 
 [report]
