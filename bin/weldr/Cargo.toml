@@ -22,6 +22,7 @@ include = [
 [[bin]]
 name = "weldr"
 path = "src/weldr.rs"
+doc = false
 
 [dependencies]
 weldr = { version = "0.2", path = "../../lib" }
