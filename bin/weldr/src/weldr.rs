@@ -3,7 +3,10 @@
 
 #![allow(dead_code)]
 
+mod error;
 mod gltf;
+
+use error::Error;
 
 use ansi_term::Color::Red;
 use ordered_float::NotNan;
@@ -15,7 +18,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use structopt::StructOpt;
-use weldr::{CommandType, Error, FileRefResolver, ResolveError, Vec3};
+use weldr::{CommandType, FileRefResolver, ResolveError, Vec3};
 
 #[derive(StructOpt)]
 #[structopt(name = "weldr", author = "Jerome Humbert <djeedai@gmail.com>")]
@@ -228,8 +231,8 @@ impl GeometryCache {
 
         let vb_file_path = base_path.with_extension("vb.glbuf");
         eprintln!("Writing VB file to {:?}", vb_file_path);
-        let mut vb_file = File::create(&vb_file_path).unwrap(); // TODO: unwrap() -> ?
-        let vb_size = self.write_vertex_buffer(&mut vb_file).unwrap(); // TODO: unwrap() -> ?
+        let mut vb_file = File::create(&vb_file_path).map_err(|e| Error::GltfWrite(e))?;
+        let vb_size = self.write_vertex_buffer(&mut vb_file)?;
         buffers.push(GeometryBuffer {
             file: vb_file_path,
             size: vb_size,
@@ -240,8 +243,8 @@ impl GeometryCache {
 
         let ib_file_path = base_path.with_extension("ib.glbuf");
         eprintln!("Writing IB file to {:?}", ib_file_path);
-        let mut ib_file = File::create(&ib_file_path).unwrap(); // TODO: unwrap() -> ?
-        let ib_size = self.write_index_buffer(&mut ib_file).unwrap(); // TODO: unwrap() -> ?
+        let mut ib_file = File::create(&ib_file_path).map_err(|e| Error::GltfWrite(e))?;
+        let ib_size = self.write_index_buffer(&mut ib_file)?;
         buffers.push(GeometryBuffer {
             file: ib_file_path,
             size: ib_size,
@@ -252,16 +255,14 @@ impl GeometryCache {
 
         eprintln!("Writing JSON file to {:?}", json_path);
         let mut json_file = File::create(json_path).unwrap();
-        self.write_gltf(&mut json_file, &buffers);
-
-        Ok(())
+        self.write_gltf(&mut json_file, &buffers)
     }
 
     fn write_gltf<W: Write>(
         &self,
         w: &mut W,
         geometry_buffers: &[GeometryBuffer],
-    ) -> Result<(), serde_json::Error> {
+    ) -> Result<(), Error> {
         let asset = gltf::Asset {
             version: "2.0".to_string(),
             min_version: None,
@@ -315,7 +316,7 @@ impl GeometryCache {
             });
             buffer_index += 1;
         }
-        let mut gltf = gltf::Gltf {
+        let gltf = gltf::Gltf {
             asset,
             nodes: vec![node],
             scenes: vec![scene],
@@ -328,21 +329,20 @@ impl GeometryCache {
         let json = serde_json::to_string_pretty(&gltf)?;
         let json = json.as_bytes();
         let buf = &json[..];
-        w.write_all(buf);
-        Ok(())
+        w.write_all(buf).map_err(|e| Error::GltfWrite(e))
     }
 
-    fn write_vertex_buffer<W: Write>(&self, w: &mut W) -> Result<usize, std::io::Error> {
+    fn write_vertex_buffer<W: Write>(&self, w: &mut W) -> Result<usize, Error> {
         let vertices = &self.vertices[..];
         let bytes: &[u8] = unsafe { as_u8_slice(vertices) };
-        w.write_all(bytes)?;
+        w.write_all(bytes).map_err(|e| Error::GltfWrite(e))?;
         Ok(bytes.len())
     }
 
-    fn write_index_buffer<W: Write>(&self, w: &mut W) -> Result<usize, std::io::Error> {
+    fn write_index_buffer<W: Write>(&self, w: &mut W) -> Result<usize, Error> {
         let indices = &self.indices[..];
         let bytes: &[u8] = unsafe { as_u8_slice(indices) };
-        w.write_all(bytes)?;
+        w.write_all(bytes).map_err(|e| Error::GltfWrite(e))?;
         Ok(bytes.len())
     }
 }
@@ -424,6 +424,12 @@ fn main() -> Result<(), Error> {
                     }
                 }
                 app.exit(1);
+            }
+            Error::JsonWrite(json_err) => {
+                app.print_error_and_exit(&format!("failed to write JSON: {}", json_err)[..]);
+            }
+            Error::GltfWrite(io_err) => {
+                app.print_error_and_exit(&format!("failed to write glTF: {}", io_err)[..]);
             }
         }
     }
