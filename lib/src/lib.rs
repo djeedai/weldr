@@ -203,6 +203,7 @@ pub struct Color {
 }
 
 impl Color {
+    /// Construct a new color instance from individual RGB components.
     pub fn new(red: u8, green: u8, blue: u8) -> Color {
         Color { red, green, blue }
     }
@@ -624,15 +625,18 @@ struct ResolveQueue {
 }
 
 /// Iterator over all drawing commands of a [`SourceFile`] and all its referenced sub-files.
+///
 /// Sub-file reference commands are not yielded, but instead the drawing commands of those
 /// sub-files are iterated over. Comment commands are skipped.
 pub struct CommandIterator<'a> {
-    stack: Vec<(&'a SourceFile, usize)>,
+    stack: Vec<(&'a SourceFile, usize, DrawContext)>,
     source_map: &'a SourceMap,
 }
 
-/// Iterator over all local commands of a [`SourceFile`] only. Sub-file reference commands and
-/// comment commands are yielded like all other commands. No command from any other file is yielded.
+/// Iterator over all local commands of a [`SourceFile`].
+///
+/// Sub-file reference commands and comment commands are yielded like all other commands.
+/// No command from any other file is yielded.
 pub struct LocalCommandIterator<'a> {
     stack: Vec<&'a SourceFile>,
     index: usize,
@@ -1036,12 +1040,18 @@ pub struct SourceFile {
     pub cmds: Vec<Command>,
 }
 
+/// Collection of [`SourceFile`] accessible from their reference filename.
 #[derive(Debug)]
 pub struct SourceMap {
+    /// Array of source files in the collection.
     source_files: Vec<SourceFile>,
+
+    /// Map table of source files indices into [`SourceMap::source_files`] from
+    /// their reference filename, as it appears in [`SubFileRefCmd`].
     filename_map: HashMap<String, usize>,
 }
 
+/// Reference to a single [`SourceFile`] instance in a given [`SourceMap`].
 #[derive(Debug, Copy, Clone, Default, PartialEq, PartialOrd, Eq, Ord, Hash)]
 pub struct SourceFileRef {
     index: usize,
@@ -1063,6 +1073,7 @@ impl SourceFileRef {
 }
 
 impl SourceMap {
+    /// Construct a new empty source map.
     pub fn new() -> SourceMap {
         SourceMap {
             source_files: vec![],
@@ -1070,14 +1081,17 @@ impl SourceMap {
         }
     }
 
+    /// Get a reference to the source file corresponding to a [`SourceFileRef`].
     fn get(&self, source_file_ref: SourceFileRef) -> &SourceFile {
         &self.source_files[source_file_ref.index]
     }
 
+    /// Get a mutable reference to the source file corresponding to a [`SourceFileRef`].
     fn get_mut(&mut self, source_file_ref: SourceFileRef) -> &mut SourceFile {
         &mut self.source_files[source_file_ref.index]
     }
 
+    /// Find a source file by its reference filename.
     fn find_filename(&self, filename: &str) -> Option<SourceFileRef> {
         match self.filename_map.get(filename) {
             Some(&index) => Some(SourceFileRef { index }),
@@ -1085,6 +1099,7 @@ impl SourceMap {
         }
     }
 
+    /// Insert a new source file into the collection.
     fn insert(&mut self, source_file: SourceFile) -> SourceFileRef {
         if let Some(&index) = self.filename_map.get(&source_file.filename) {
             return SourceFileRef { index };
@@ -1097,6 +1112,8 @@ impl SourceMap {
         }
     }
 
+    /// Attempt to resolve the sub-file references of a given source file, and insert unresolved
+    /// references into the given [`ResolveQueue`].
     fn resolve_file_refs(&mut self, source_file_ref: SourceFileRef, queue: &mut ResolveQueue) {
         // Steal filename map to decouple its lifetime from the one of the source files vector,
         // and allow lookup while mutably iterating over the source files and their commands
