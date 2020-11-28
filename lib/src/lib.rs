@@ -154,9 +154,12 @@ fn take_not_space(input: &[u8]) -> IResult<&[u8], &[u8]> {
     input.split_at_position_complete(|item| is_space(item))
 }
 
-// Read the command ID and swallow the following space
+// Read the command ID and swallow the following space, if any.
 fn read_cmd_id_str(input: &[u8]) -> IResult<&[u8], &[u8]> {
-    terminated(take_while1(is_digit), sp)(input)
+    //terminated(take_while1(is_digit), sp)(input) //< This does not work if there's no space (e.g. 4-4cylo.dat)
+    let (ii, o) = input.split_at_position1_complete(|item| !is_digit(item), ErrorKind::Digit)?;
+    let (i, _) = space0(ii)?;
+    Ok((i, o))
 }
 
 named!(
@@ -408,7 +411,7 @@ named!(
 
 named!(
     meta_cmd<Command>,
-    alt!(category | keywords | meta_colour | comment)
+    alt!(complete!(category) | complete!(keywords) | complete!(meta_colour) | comment)
 );
 
 named!(sp<char>, char!(' '));
@@ -1690,6 +1693,18 @@ mod tests {
     }
 
     #[test]
+    fn test_read_cmd_id_str() {
+        assert_eq!(read_cmd_id_str(b"0"), Ok((&b""[..], &b"0"[..])));
+        assert_eq!(read_cmd_id_str(b"0 "), Ok((&b""[..], &b"0"[..])));
+        assert_eq!(read_cmd_id_str(b"0   "), Ok((&b""[..], &b"0"[..])));
+        assert_eq!(read_cmd_id_str(b"0   e"), Ok((&b"e"[..], &b"0"[..])));
+        assert_eq!(
+            read_cmd_id_str(b"4547    ssd"),
+            Ok((&b"ssd"[..], &b"4547"[..]))
+        );
+    }
+
+    #[test]
     fn test_end_of_line() {
         assert_eq!(end_of_line(b""), Ok((&b""[..], &b""[..])));
         assert_eq!(end_of_line(b"\n"), Ok((&b""[..], &b"\n"[..])));
@@ -1803,6 +1818,11 @@ mod tests {
         let comment = b"test of comment, with \"weird\" characters";
         let res = Command::Comment(CommentCmd::new(std::str::from_utf8(comment).unwrap()));
         assert_eq!(meta_cmd(comment), Ok((&b""[..], res)));
+        // Match empty comment too (e.g. "0" line without anything else, or "0   " with only spaces)
+        assert_eq!(
+            meta_cmd(b""),
+            Ok((&b""[..], Command::Comment(CommentCmd::new(""))))
+        );
     }
 
     #[test]
