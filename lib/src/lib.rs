@@ -17,7 +17,7 @@
 //! ```rust
 //! extern crate weldr;
 //!
-//! use weldr::{parse_raw, CommandType, CommentCmd, LineCmd, Vec3};
+//! use weldr::{parse_raw, Command, CommentCmd, LineCmd, Vec3};
 //!
 //! fn main() {}
 //!
@@ -25,8 +25,8 @@
 //! fn parse_ldr() {
 //!   let ldr = b"0 this is a comment\n2 16 0 0 0 1 1 1";
 //!   let cmds = parse_raw(ldr);
-//!   let cmd0 = CommandType::Comment(CommentCmd{ text: "this is a comment".to_string() });
-//!   let cmd1 = CommandType::Line(LineCmd{
+//!   let cmd0 = Command::Comment(CommentCmd{ text: "this is a comment".to_string() });
+//!   let cmd1 = Command::Line(LineCmd{
 //!     color: 16,
 //!     vertices: [
 //!       Vec3{ x: 0.0, y: 0.0, z: 0.0 },
@@ -160,12 +160,12 @@ fn read_cmd_id_str(input: &[u8]) -> IResult<&[u8], &[u8]> {
 }
 
 named!(
-    category<CommandType>,
+    category<Command>,
     do_parse!(
         tag!(b"!CATEGORY")
             >> sp
             >> content: take_not_cr_or_lf
-            >> (CommandType::Category(CategoryCmd {
+            >> (Command::Category(CategoryCmd {
                 category: std::str::from_utf8(content).unwrap().to_string()
             }))
     )
@@ -177,12 +177,12 @@ named!(
 );
 
 named!(
-    keywords<CommandType>,
+    keywords<Command>,
     do_parse!(
         tag!(b"!KEYWORDS")
             >> sp
             >> keywords: keywords_list
-            >> (CommandType::Keywords(KeywordsCmd {
+            >> (Command::Keywords(KeywordsCmd {
                 keywords: keywords
                     .iter()
                     .map(|&kw| std::str::from_utf8(kw).unwrap().trim().to_string())
@@ -360,7 +360,7 @@ named!(
 
 // !COLOUR extension meta-command
 named!(
-    meta_colour<CommandType>,
+    meta_colour<Command>,
     do_parse!(
         tag!(b"!COLOUR")
             >> sp
@@ -380,7 +380,7 @@ named!(
             >> alpha: colour_alpha
             >> luminance: colour_luminance
             >> finish: color_finish
-            >> (CommandType::Colour(ColourCmd {
+            >> (Command::Colour(ColourCmd {
                 name: std::str::from_utf8(name).unwrap().to_string(),
                 code,
                 value,
@@ -393,17 +393,17 @@ named!(
 );
 
 named!(
-    comment<CommandType>,
+    comment<Command>,
     do_parse!(
         content: take_not_cr_or_lf
-            >> (CommandType::Comment(CommentCmd {
+            >> (Command::Comment(CommentCmd {
                 text: std::str::from_utf8(content).unwrap().to_string()
             }))
     )
 );
 
 named!(
-    meta_cmd<CommandType>,
+    meta_cmd<Command>,
     alt!(category | keywords | meta_colour | comment)
 );
 
@@ -432,7 +432,7 @@ fn filename_char(input: &[u8]) -> IResult<&[u8], &[u8]> {
 named!(filename<&str>, map_res!(filename_char, str::from_utf8));
 
 named!(
-    file_ref_cmd<CommandType>,
+    file_ref_cmd<Command>,
     do_parse!(
         color: color_id
             >> sp
@@ -445,7 +445,7 @@ named!(
             >> row2: read_vec3
             >> sp
             >> file: filename
-            >> (CommandType::SubFileRef(SubFileRefCmd {
+            >> (Command::SubFileRef(SubFileRefCmd {
                 color: color,
                 pos: pos,
                 row0: row0,
@@ -457,14 +457,14 @@ named!(
 );
 
 named!(
-    line_cmd<CommandType>,
+    line_cmd<Command>,
     do_parse!(
         color: color_id
             >> sp
             >> v1: read_vec3
             >> sp
             >> v2: read_vec3
-            >> (CommandType::Line(LineCmd {
+            >> (Command::Line(LineCmd {
                 color: color,
                 vertices: [v1, v2]
             }))
@@ -472,7 +472,7 @@ named!(
 );
 
 named!(
-    tri_cmd<CommandType>,
+    tri_cmd<Command>,
     do_parse!(
         color: color_id
             >> sp
@@ -481,7 +481,7 @@ named!(
             >> v2: read_vec3
             >> sp
             >> v3: read_vec3
-            >> (CommandType::Triangle(TriangleCmd {
+            >> (Command::Triangle(TriangleCmd {
                 color: color,
                 vertices: [v1, v2, v3]
             }))
@@ -489,7 +489,7 @@ named!(
 );
 
 named!(
-    quad_cmd<CommandType>,
+    quad_cmd<Command>,
     do_parse!(
         color: color_id
             >> sp
@@ -500,7 +500,7 @@ named!(
             >> v3: read_vec3
             >> sp
             >> v4: read_vec3
-            >> (CommandType::Quad(QuadCmd {
+            >> (Command::Quad(QuadCmd {
                 color: color,
                 vertices: [v1, v2, v3, v4]
             }))
@@ -508,7 +508,7 @@ named!(
 );
 
 named!(
-    opt_line_cmd<CommandType>,
+    opt_line_cmd<Command>,
     do_parse!(
         color: color_id
             >> sp
@@ -519,7 +519,7 @@ named!(
             >> v3: read_vec3
             >> sp
             >> v4: read_vec3
-            >> (CommandType::OptLine(OptLineCmd {
+            >> (Command::OptLine(OptLineCmd {
                 color: color,
                 vertices: [v1, v2],
                 control_points: [v3, v4]
@@ -554,7 +554,7 @@ named!(empty_line, terminated!(space0, end_of_line));
 // "The line type of a line is the first number on the line."
 // "If the line type of the command is invalid, the line is ignored."
 named!(
-    read_line<CommandType>,
+    read_line<Command>,
     do_parse!(
         space_or_eol0
             >> cmd: switch!(read_cmd_id_str,
@@ -580,11 +580,11 @@ named!(
 /// - Both DOS/Windows <CR><LF> and Unix <LF> line termination accepted
 ///
 /// ```rust
-/// use weldr::{parse_raw, CommandType, CommentCmd, LineCmd, Vec3};
+/// use weldr::{parse_raw, Command, CommentCmd, LineCmd, Vec3};
 ///
 /// fn main() {
-///   let cmd0 = CommandType::Comment(CommentCmd{ text: "this is a comment".to_string() });
-///   let cmd1 = CommandType::Line(LineCmd{
+///   let cmd0 = Command::Comment(CommentCmd{ text: "this is a comment".to_string() });
+///   let cmd1 = Command::Line(LineCmd{
 ///     color: 16,
 ///     vertices: [
 ///       Vec3{ x: 0.0, y: 0.0, z: 0.0 },
@@ -594,7 +594,7 @@ named!(
 ///   assert_eq!(parse_raw(b"0 this is a comment\n2 16 0 0 0 1 1 1").unwrap(), vec![cmd0, cmd1]);
 /// }
 /// ```
-pub fn parse_raw(ldr_content: &[u8]) -> Result<Vec<CommandType>, Error> {
+pub fn parse_raw(ldr_content: &[u8]) -> Result<Vec<Command>, Error> {
     // "An LDraw file consists of one command per line."
     many0(read_line)(ldr_content).map_or_else(
         |e| Err(Error::Parse(ParseError::new_from_nom("", &e))),
@@ -633,7 +633,7 @@ pub struct LocalCommandIterator<'a> {
 }
 
 // impl std::iter::IntoIterator for SourceFile {
-//     type Item = &'a CommandType;
+//     type Item = &'a Command;
 //     type IntoIter = &'a CommandIterator;
 
 //     fn into_iter(self) -> Self::IntoIter {
@@ -667,22 +667,22 @@ impl SourceFile {
 }
 
 impl<'a> Iterator for CommandIterator<'a> {
-    type Item = &'a CommandType;
+    type Item = &'a Command;
 
-    fn next(&mut self) -> Option<&'a CommandType> {
+    fn next(&mut self) -> Option<&'a Command> {
         while let Some(entry) = self.stack.last_mut() {
             let cmds = &entry.0.cmds;
             let index = &mut entry.1;
             if *index < cmds.len() {
                 let cmd = &cmds[*index];
                 *index += 1;
-                if let CommandType::SubFileRef(sfr_cmd) = &cmd {
+                if let Command::SubFileRef(sfr_cmd) = &cmd {
                     if let SubFileRef::ResolvedRef(resolved_ref) = &sfr_cmd.file {
                         let source_file_2 = resolved_ref.get(self.source_map);
                         self.stack.push((source_file_2, 0));
                         continue;
                     }
-                } else if let CommandType::Comment(_) = &cmd {
+                } else if let Command::Comment(_) = &cmd {
                     // Skip comments
                     continue;
                 }
@@ -695,9 +695,9 @@ impl<'a> Iterator for CommandIterator<'a> {
 }
 
 impl<'a> Iterator for LocalCommandIterator<'a> {
-    type Item = &'a CommandType;
+    type Item = &'a Command;
 
-    fn next(&mut self) -> Option<&'a CommandType> {
+    fn next(&mut self) -> Option<&'a Command> {
         while let Some(source_file) = self.stack.last() {
             let cmds = &source_file.cmds;
             if self.index < cmds.len() {
@@ -718,7 +718,7 @@ fn test_iter() {
     let source_file = SourceFile {
         filename: "tata".to_string(),
         raw_content: vec![],
-        cmds: vec![CommandType::Triangle(TriangleCmd {
+        cmds: vec![Command::Triangle(TriangleCmd {
             color: 2,
             vertices: [
                 Vec3::new(0.0, 0.0, 0.0),
@@ -732,7 +732,7 @@ fn test_iter() {
         filename: "toto".to_string(),
         raw_content: vec![],
         cmds: vec![
-            CommandType::Triangle(TriangleCmd {
+            Command::Triangle(TriangleCmd {
                 color: 16,
                 vertices: [
                     Vec3::new(0.0, 0.0, 1.0),
@@ -740,7 +740,7 @@ fn test_iter() {
                     Vec3::new(0.0, 1.0, 1.0),
                 ],
             }),
-            CommandType::SubFileRef(SubFileRefCmd {
+            Command::SubFileRef(SubFileRefCmd {
                 color: 24,
                 pos: Vec3::new(0.0, 0.0, 0.0),
                 row0: Vec3::new(0.0, 0.0, 0.0),
@@ -748,7 +748,7 @@ fn test_iter() {
                 row2: Vec3::new(0.0, 0.0, 0.0),
                 file: SubFileRef::ResolvedRef(source_file_ref),
             }),
-            CommandType::Quad(QuadCmd {
+            Command::Quad(QuadCmd {
                 color: 1,
                 vertices: [
                     Vec3::new(0.0, 1.0, 0.0),
@@ -767,15 +767,15 @@ fn test_iter() {
     let cmds: Vec<_> = source_file.iter(&source_map).collect();
     assert_eq!(3, cmds.len());
     match &cmds[0] {
-        CommandType::Triangle(tri_cmd) => assert_eq!(16, tri_cmd.color),
+        Command::Triangle(tri_cmd) => assert_eq!(16, tri_cmd.color),
         _ => panic!(),
     }
     match &cmds[1] {
-        CommandType::Triangle(tri_cmd) => assert_eq!(2, tri_cmd.color),
+        Command::Triangle(tri_cmd) => assert_eq!(2, tri_cmd.color),
         _ => panic!(),
     }
     match &cmds[2] {
-        CommandType::Quad(quad_cmd) => assert_eq!(1, quad_cmd.color),
+        Command::Quad(quad_cmd) => assert_eq!(1, quad_cmd.color),
         _ => panic!(),
     }
 }
@@ -1026,7 +1026,7 @@ pub struct SourceFile {
     /// so the file can contain a mix of both, although this is not recommended.
     pub raw_content: Vec<u8>,
     /// LDraw commands parsed from the raw text content of the file.
-    pub cmds: Vec<CommandType>,
+    pub cmds: Vec<Command>,
 }
 
 #[derive(Debug)]
@@ -1094,7 +1094,7 @@ impl SourceMap {
         let referer_filename = source_file.filename.clone();
         let mut subfile_set = HashSet::new();
         for cmd in &mut source_file.cmds {
-            if let CommandType::SubFileRef(sfr_cmd) = cmd {
+            if let Command::SubFileRef(sfr_cmd) = cmd {
                 // All subfile refs come out of parse_raw() as unresolved by definition,
                 // since parse_raw() doesn't have access to the source map nor the resolver.
                 // See if we can resolve some of them now.
@@ -1205,7 +1205,7 @@ pub struct OptLineCmd {
 
 /// Types of commands contained in a LDraw file.
 #[derive(Debug, PartialEq)]
-pub enum CommandType {
+pub enum Command {
     /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
     /// [!CATEGORY language extension](https://www.ldraw.org/article/340.html#category).
     Category(CategoryCmd),
@@ -1627,7 +1627,7 @@ mod tests {
             meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef"),
             Ok((
                 &b""[..],
-                CommandType::Colour(ColourCmd {
+                Command::Colour(ColourCmd {
                     name: "test_col".to_string(),
                     code: 20,
                     value: Color {
@@ -1650,7 +1650,7 @@ mod tests {
             meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef ALPHA 128"),
             Ok((
                 &b""[..],
-                CommandType::Colour(ColourCmd {
+                Command::Colour(ColourCmd {
                     name: "test_col".to_string(),
                     code: 20,
                     value: Color {
@@ -1673,7 +1673,7 @@ mod tests {
             meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef LUMINANCE 32"),
             Ok((
                 &b""[..],
-                CommandType::Colour(ColourCmd {
+                Command::Colour(ColourCmd {
                     name: "test_col".to_string(),
                     code: 20,
                     value: Color {
@@ -1698,7 +1698,7 @@ mod tests {
             ),
             Ok((
                 &b""[..],
-                CommandType::Colour(ColourCmd {
+                Command::Colour(ColourCmd {
                     name: "test_col".to_string(),
                     code: 20,
                     value: Color {
@@ -1721,7 +1721,7 @@ mod tests {
             meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef CHROME"),
             Ok((
                 &b""[..],
-                CommandType::Colour(ColourCmd {
+                Command::Colour(ColourCmd {
                     name: "test_col".to_string(),
                     code: 20,
                     value: Color {
@@ -1744,7 +1744,7 @@ mod tests {
             meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef ALPHA 128 RUBBER"),
             Ok((
                 &b""[..],
-                CommandType::Colour(ColourCmd {
+                Command::Colour(ColourCmd {
                     name: "test_col".to_string(),
                     code: 20,
                     value: Color {
@@ -1899,7 +1899,7 @@ mod tests {
 
     #[test]
     fn test_category_cmd() {
-        let res = CommandType::Category(CategoryCmd {
+        let res = Command::Category(CategoryCmd {
             category: "Figure Accessory".to_string(),
         });
         assert_eq!(category(b"!CATEGORY Figure Accessory"), Ok((&b""[..], res)));
@@ -1907,7 +1907,7 @@ mod tests {
 
     #[test]
     fn test_keywords_cmd() {
-        let res = CommandType::Keywords(KeywordsCmd {
+        let res = Command::Keywords(KeywordsCmd {
             keywords: vec![
                 "western".to_string(),
                 "wild west".to_string(),
@@ -1925,7 +1925,7 @@ mod tests {
     #[test]
     fn test_comment_cmd() {
         let comment = b"test of comment, with \"weird\" characters";
-        let res = CommandType::Comment(CommentCmd {
+        let res = Command::Comment(CommentCmd {
             text: std::str::from_utf8(comment).unwrap().to_string(),
         });
         assert_eq!(meta_cmd(comment), Ok((&b""[..], res)));
@@ -1933,7 +1933,7 @@ mod tests {
 
     #[test]
     fn test_file_ref_cmd() {
-        let res = CommandType::SubFileRef(SubFileRefCmd {
+        let res = Command::SubFileRef(SubFileRefCmd {
             color: 16,
             pos: Vec3 {
                 x: 0.0,
@@ -2021,7 +2021,7 @@ mod tests {
 
     #[test]
     fn test_read_cmd() {
-        let res = CommandType::Comment(CommentCmd {
+        let res = Command::Comment(CommentCmd {
             text: "this doesn't matter".to_string(),
         });
         assert_eq!(read_line(b"0 this doesn't matter"), Ok((&b""[..], res)));
@@ -2029,7 +2029,7 @@ mod tests {
 
     #[test]
     fn test_read_line_cmd() {
-        let res = CommandType::Line(LineCmd {
+        let res = Command::Line(LineCmd {
             color: 16,
             vertices: [
                 Vec3 {
@@ -2052,7 +2052,7 @@ mod tests {
 
     #[test]
     fn test_read_tri_cmd() {
-        let res = CommandType::Triangle(TriangleCmd {
+        let res = Command::Triangle(TriangleCmd {
             color: 16,
             vertices: [
                 Vec3 {
@@ -2080,7 +2080,7 @@ mod tests {
 
     #[test]
     fn test_read_quad_cmd() {
-        let res = CommandType::Quad(QuadCmd {
+        let res = Command::Quad(QuadCmd {
             color: 16,
             vertices: [
                 Vec3 {
@@ -2113,7 +2113,7 @@ mod tests {
 
     #[test]
     fn test_read_opt_line_cmd() {
-        let res = CommandType::OptLine(OptLineCmd {
+        let res = Command::OptLine(OptLineCmd {
             color: 16,
             vertices: [
                 Vec3 {
@@ -2148,7 +2148,7 @@ mod tests {
 
     #[test]
     fn test_read_line_subfileref() {
-        let res = CommandType::SubFileRef(SubFileRefCmd {
+        let res = Command::SubFileRef(SubFileRefCmd {
             color: 16,
             pos: Vec3 {
                 x: 0.0,
@@ -2180,10 +2180,10 @@ mod tests {
 
     #[test]
     fn test_parse_raw() {
-        let cmd0 = CommandType::Comment(CommentCmd {
+        let cmd0 = Command::Comment(CommentCmd {
             text: "this is a comment".to_string(),
         });
-        let cmd1 = CommandType::Line(LineCmd {
+        let cmd1 = Command::Line(LineCmd {
             color: 16,
             vertices: [
                 Vec3 {
@@ -2203,10 +2203,10 @@ mod tests {
             vec![cmd0, cmd1]
         );
 
-        let cmd0 = CommandType::Comment(CommentCmd {
+        let cmd0 = Command::Comment(CommentCmd {
             text: "this doesn't matter".to_string(),
         });
-        let cmd1 = CommandType::SubFileRef(SubFileRefCmd {
+        let cmd1 = Command::SubFileRef(SubFileRefCmd {
             color: 16,
             pos: Vec3 {
                 x: 0.0,
@@ -2236,10 +2236,10 @@ mod tests {
             vec![cmd0, cmd1]
         );
 
-        let cmd0 = CommandType::Comment(CommentCmd {
+        let cmd0 = Command::Comment(CommentCmd {
             text: "this doesn't \"matter\"".to_string(),
         });
-        let cmd1 = CommandType::SubFileRef(SubFileRefCmd {
+        let cmd1 = Command::SubFileRef(SubFileRefCmd {
             color: 16,
             pos: Vec3 {
                 x: 0.0,
@@ -2271,7 +2271,7 @@ mod tests {
             vec![cmd0, cmd1]
         );
 
-        let cmd0 = CommandType::SubFileRef(SubFileRefCmd {
+        let cmd0 = Command::SubFileRef(SubFileRefCmd {
             color: 16,
             pos: Vec3 {
                 x: 0.0,
@@ -2295,7 +2295,7 @@ mod tests {
             },
             file: SubFileRef::UnresolvedRef("aa/aaaaddd".to_string()),
         });
-        let cmd1 = CommandType::SubFileRef(SubFileRefCmd {
+        let cmd1 = Command::SubFileRef(SubFileRefCmd {
             color: 16,
             pos: Vec3 {
                 x: 0.0,
