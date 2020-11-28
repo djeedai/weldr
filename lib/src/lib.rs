@@ -38,8 +38,8 @@
 //! ```
 //!
 //! A slightly more involved but more powerful approach is to load and resolve a file and all its
-//! sub-file references recursively using the `parse()` function. This requires implementing the
-//! `FileRefResolver` trait to load file content by reference filename.
+//! sub-file references recursively using the [`parse()`] function. This requires implementing the
+//! [`FileRefResolver`] trait to load file content by reference filename.
 //!
 //! The code is available on [GitHub](https://github.com/djeedai/weldr).
 //!
@@ -1068,10 +1068,12 @@ pub enum CommandType {
 
 /// Resolver trait for sub-file references ([Line Type 1](https://www.ldraw.org/article/218.html#lt1) LDraw command).
 ///
-/// An implementation of this trait must be passed to [`parse`] to allow resolving sub-file references recursively,
-/// and parsing all dependent sub-files of the top-level file being parsed. Implementations are free to decide how to
-/// retrieve the file, but must ensure that all canonical paths are in scope, as sub-file references can be relative
-/// to any of those:
+/// An implementation of this trait must be passed to [`parse()`] to allow resolving sub-file references recursively,
+/// and parsing all dependent sub-files of the top-level file provided.
+///
+/// When loading parts and primitives from the official LDraw catalog, implementations are free to decide how to retrieve
+/// the file content, but must ensure that all canonical paths are in scope, as sub-file references can be relative to
+/// any of those:
 /// - `/p/`       - Parts primitives
 /// - `/p/48/`    - High-resolution primitives
 /// - `/parts/`   - Main catalog of parts
@@ -1081,7 +1083,7 @@ pub trait FileRefResolver {
     /// the content of the file as a UTF-8 encoded buffer of bytes, without BOM. Line ending can be indifferently
     /// Unix style `\n` or Windows style `\r\n`.
     ///
-    /// See [`parse`] for usage.
+    /// See [`parse()`] for usage.
     fn resolve(&self, filename: &str) -> Result<Vec<u8>, ResolveError>;
 }
 

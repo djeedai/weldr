@@ -13,15 +13,23 @@ pub enum Error {
     Resolve(ResolveError),
 }
 
+/// Error related to parsing the content of an LDraw file.
 #[derive(Debug)]
 pub struct ParseError {
+    /// Filename of the sub-file reference, generally relative to some canonical catalog path(s).
     pub filename: String,
+
+    /// Optional underlying error raised by the internal parser.
     pub parse_error: Option<Box<dyn std::error::Error>>,
 }
 
+/// Error related to resolving a sub-file reference of a source file.
 #[derive(Debug)]
 pub struct ResolveError {
+    /// Filename of the sub-file reference, generally relative to some canonical catalog path(s).
     pub filename: String,
+
+    /// Optional underlying error raised by the resolver implementation.
     pub resolve_error: Option<Box<dyn std::error::Error>>,
 }
 
