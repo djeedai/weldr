@@ -616,6 +616,166 @@ struct ResolveQueue {
     pending_count: HashMap<String, u32>,
 }
 
+/// Iterator over all drawing commands of a [`SourceFile`] and all its referenced sub-files.
+/// Sub-file reference commands are not yielded, but instead the drawing commands of those
+/// sub-files are iterated over.
+pub struct CommandIterator<'a> {
+    stack: Vec<(&'a SourceFile, usize)>,
+    source_map: &'a SourceMap,
+}
+
+/// Iterator over all local commands of a [`SourceFile`] only. Sub-file reference commands are
+/// yielded like all other commands. No command from any other file is yielded.
+pub struct LocalCommandIterator<'a> {
+    stack: Vec<&'a SourceFile>,
+    index: usize,
+    source_map: &'a SourceMap,
+}
+
+// impl std::iter::IntoIterator for SourceFile {
+//     type Item = &'a CommandType;
+//     type IntoIter = &'a CommandIterator;
+
+//     fn into_iter(self) -> Self::IntoIter {
+//         CommandIterator {
+//             stack: vec![self.clone()],
+//             index: 0,
+//         }
+//     }
+// }
+
+impl SourceFile {
+    /// Return an iterator over all drawing commands, recursively stepping into sub-file references
+    /// without returning the corresponding [`SubFileRefCmd`] command.
+    pub fn iter<'a>(&'a self, source_map: &'a SourceMap) -> CommandIterator<'a> {
+        CommandIterator {
+            stack: vec![(&self, 0)],
+            source_map,
+        }
+    }
+
+    /// Return an iterator over all commands local to this source file, including sub-file references.
+    /// Unlike [`SourceFile::iter()`], this doesn't step into those sub-file references but stay in the local source file.
+    pub fn local_iter<'a>(&'a self, source_map: &'a SourceMap) -> LocalCommandIterator<'a> {
+        LocalCommandIterator {
+            stack: vec![&self],
+            index: 0,
+            source_map,
+        }
+    }
+}
+
+impl<'a> Iterator for CommandIterator<'a> {
+    type Item = &'a CommandType;
+
+    fn next(&mut self) -> Option<&'a CommandType> {
+        while let Some(entry) = self.stack.last_mut() {
+            let cmds = &entry.0.cmds;
+            let index = &mut entry.1;
+            if *index < cmds.len() {
+                let cmd = &cmds[*index];
+                *index += 1;
+                if let CommandType::SubFileRef(sfr_cmd) = &cmd {
+                    if let SubFileRef::ResolvedRef(resolved_ref) = &sfr_cmd.file {
+                        let source_file_2 = resolved_ref.get(self.source_map);
+                        self.stack.push((source_file_2, 0));
+                        continue;
+                    }
+                }
+                return Some(cmd);
+            }
+            self.stack.pop();
+        }
+        None
+    }
+}
+
+impl<'a> Iterator for LocalCommandIterator<'a> {
+    type Item = &'a CommandType;
+
+    fn next(&mut self) -> Option<&'a CommandType> {
+        while let Some(source_file) = self.stack.last() {
+            let cmds = &source_file.cmds;
+            if self.index < cmds.len() {
+                let index = self.index;
+                self.index += 1;
+                return Some(&cmds[index]);
+            }
+            self.index = 0;
+            self.stack.pop();
+        }
+        None
+    }
+}
+
+#[test]
+fn test_iter() {
+    let mut source_map = SourceMap::new();
+    let source_file = SourceFile {
+        filename: "tata".to_string(),
+        raw_content: vec![],
+        cmds: vec![CommandType::Triangle(TriangleCmd {
+            color: 2,
+            vertices: [
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            ],
+        })],
+    };
+    let source_file_ref = source_map.insert(source_file);
+    let s = SourceFile {
+        filename: "toto".to_string(),
+        raw_content: vec![],
+        cmds: vec![
+            CommandType::Triangle(TriangleCmd {
+                color: 16,
+                vertices: [
+                    Vec3::new(0.0, 0.0, 1.0),
+                    Vec3::new(1.0, 0.0, 1.0),
+                    Vec3::new(0.0, 1.0, 1.0),
+                ],
+            }),
+            CommandType::SubFileRef(SubFileRefCmd {
+                color: 24,
+                pos: Vec3::new(0.0, 0.0, 0.0),
+                row0: Vec3::new(0.0, 0.0, 0.0),
+                row1: Vec3::new(0.0, 0.0, 0.0),
+                row2: Vec3::new(0.0, 0.0, 0.0),
+                file: SubFileRef::ResolvedRef(source_file_ref),
+            }),
+            CommandType::Quad(QuadCmd {
+                color: 1,
+                vertices: [
+                    Vec3::new(0.0, 1.0, 0.0),
+                    Vec3::new(0.0, 1.0, 1.0),
+                    Vec3::new(1.0, 1.0, 1.0),
+                    Vec3::new(1.0, 1.0, 0.0),
+                ],
+            }),
+        ],
+    };
+    let source_file_ref = source_map.insert(s);
+    let source_file = source_file_ref.get(&source_map);
+    for c in source_file.iter(&source_map) {
+        println!("cmd: {:?}", c);
+    }
+    let cmds: Vec<_> = source_file.iter(&source_map).collect();
+    assert_eq!(3, cmds.len());
+    match &cmds[0] {
+        CommandType::Triangle(tri_cmd) => assert_eq!(16, tri_cmd.color),
+        _ => panic!(),
+    }
+    match &cmds[1] {
+        CommandType::Triangle(tri_cmd) => assert_eq!(2, tri_cmd.color),
+        _ => panic!(),
+    }
+    match &cmds[2] {
+        CommandType::Quad(quad_cmd) => assert_eq!(1, quad_cmd.color),
+        _ => panic!(),
+    }
+}
+
 impl ResolveQueue {
     fn new() -> ResolveQueue {
         return ResolveQueue {
