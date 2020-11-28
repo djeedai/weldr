@@ -434,27 +434,10 @@ fn main() -> Result<(), Error> {
         }
     }
 
-    let buf = gltf::Buffer {
-        name: None,
-        byte_length: 32,
-        uri: Some("buf1.glb".to_string()),
-    };
-    let asset = gltf::Asset {
-        version: "3.1".to_string(),
-        min_version: None,
-        generator: Some("weldr".to_string()),
-        copyright: None,
-    };
-    let gltf = gltf::Gltf {
-        asset,
-        nodes: vec![],
-        scenes: vec![],
-        buffers: vec![buf],
-        buffer_views: vec![],
-        accessors: vec![],
-        meshes: vec![],
-        scene: None,
-    };
+    let buf = gltf::Buffer::new(32).uri("buf1.glb");
+    let asset = gltf::Asset::new("2.0").generator("weldr");
+    let mut gltf = gltf::Gltf::new(asset);
+    gltf.buffers.push(buf);
     let json = serde_json::to_string_pretty(&gltf);
     println!("json={:#?}", json.unwrap());
 
@@ -472,18 +455,7 @@ mod tests {
     #[test]
     fn test_as_u8_slice() {
         assert_eq!(12, std::mem::size_of::<Vec3>());
-        let v = vec![
-            Vec3 {
-                x: 1.0,
-                y: 2.0,
-                z: 4.0,
-            },
-            Vec3 {
-                x: 1.0,
-                y: 2.0,
-                z: 4.0,
-            },
-        ];
+        let v = vec![Vec3::new(1.0, 2.0, 4.0), Vec3::new(1.0, 2.0, 4.0)];
         let b: &[u8] = unsafe { as_u8_slice(&v[..]) };
         assert_eq!(24, b.len());
     }

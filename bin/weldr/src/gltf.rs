@@ -253,6 +253,21 @@ impl Asset {
     }
 }
 
+impl Buffer {
+    pub fn new(byte_length: u32) -> Buffer {
+        Buffer {
+            name: None,
+            byte_length,
+            uri: None,
+        }
+    }
+
+    pub fn uri(mut self, uri: &str) -> Self {
+        self.uri = Some(uri.to_string());
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
