@@ -25,7 +25,7 @@
 //! fn parse_ldr() {
 //!   let ldr = b"0 this is a comment\n2 16 0 0 0 1 1 1";
 //!   let cmds = parse_raw(ldr);
-//!   let cmd0 = Command::Comment(CommentCmd{ text: "this is a comment".to_string() });
+//!   let cmd0 = Command::Comment(CommentCmd::new("this is a comment"));
 //!   let cmd1 = Command::Line(LineCmd{
 //!     color: 16,
 //!     vertices: [
@@ -197,6 +197,12 @@ pub struct Color {
     pub red: u8,
     pub green: u8,
     pub blue: u8,
+}
+
+impl Color {
+    pub fn new(red: u8, green: u8, blue: u8) -> Color {
+        Color { red, green, blue }
+    }
 }
 
 fn from_hex(input: &[u8]) -> Result<u8, nom::error::ErrorKind> {
@@ -396,9 +402,7 @@ named!(
     comment<Command>,
     do_parse!(
         content: take_not_cr_or_lf
-            >> (Command::Comment(CommentCmd {
-                text: std::str::from_utf8(content).unwrap().to_string()
-            }))
+            >> (Command::Comment(CommentCmd::new(std::str::from_utf8(content).unwrap())))
     )
 );
 
@@ -583,7 +587,7 @@ named!(
 /// use weldr::{parse_raw, Command, CommentCmd, LineCmd, Vec3};
 ///
 /// fn main() {
-///   let cmd0 = Command::Comment(CommentCmd{ text: "this is a comment".to_string() });
+///   let cmd0 = Command::Comment(CommentCmd::new("this is a comment"));
 ///   let cmd1 = Command::Line(LineCmd{
 ///     color: 16,
 ///     vertices: [
@@ -1041,6 +1045,14 @@ pub struct SourceFileRef {
     // TODO: ref to SourceMap?
 }
 
+impl CommentCmd {
+    pub fn new(text: &str) -> CommentCmd {
+        CommentCmd {
+            text: text.to_string(),
+        }
+    }
+}
+
 impl SourceFileRef {
     pub fn get<'a>(&'a self, source_map: &'a SourceMap) -> &'a SourceFile {
         source_map.get(*self)
@@ -1280,47 +1292,19 @@ mod tests {
         );
         assert_eq!(
             hex_color(b"#123456"),
-            Ok((
-                &b""[..],
-                Color {
-                    red: 0x12,
-                    green: 0x34,
-                    blue: 0x56
-                }
-            ))
+            Ok((&b""[..], Color::new(0x12, 0x34, 0x56)))
         );
         assert_eq!(
             hex_color(b"#ABCDEF"),
-            Ok((
-                &b""[..],
-                Color {
-                    red: 0xAB,
-                    green: 0xCD,
-                    blue: 0xEF
-                }
-            ))
+            Ok((&b""[..], Color::new(0xAB, 0xCD, 0xEF)))
         );
         assert_eq!(
             hex_color(b"#8E5cAf"),
-            Ok((
-                &b""[..],
-                Color {
-                    red: 0x8E,
-                    green: 0x5C,
-                    blue: 0xAF
-                }
-            ))
+            Ok((&b""[..], Color::new(0x8E, 0x5C, 0xAF)))
         );
         assert_eq!(
             hex_color(b"#123456e"),
-            Ok((
-                &b"e"[..],
-                Color {
-                    red: 0x12,
-                    green: 0x34,
-                    blue: 0x56
-                }
-            ))
+            Ok((&b"e"[..], Color::new(0x12, 0x34, 0x56)))
         );
     }
 
@@ -1410,11 +1394,7 @@ mod tests {
             Ok((
                 &b""[..],
                 ColorFinish::Material(MaterialFinish::Glitter(GlitterMaterial {
-                    value: Color {
-                        red: 0x12,
-                        green: 0x34,
-                        blue: 0x56
-                    },
+                    value: Color::new(0x12, 0x34, 0x56),
                     alpha: None,
                     luminance: None,
                     surface_fraction: 1.0,
@@ -1428,11 +1408,7 @@ mod tests {
             Ok((
                 &b""[..],
                 ColorFinish::Material(MaterialFinish::Glitter(GlitterMaterial {
-                    value: Color {
-                        red: 0x12,
-                        green: 0x34,
-                        blue: 0x56
-                    },
+                    value: Color::new(0x12, 0x34, 0x56),
                     alpha: Some(128),
                     luminance: None,
                     surface_fraction: 1.0,
@@ -1448,11 +1424,7 @@ mod tests {
             Ok((
                 &b""[..],
                 ColorFinish::Material(MaterialFinish::Glitter(GlitterMaterial {
-                    value: Color {
-                        red: 0x12,
-                        green: 0x34,
-                        blue: 0x56
-                    },
+                    value: Color::new(0x12, 0x34, 0x56),
                     alpha: None,
                     luminance: Some(32),
                     surface_fraction: 1.0,
@@ -1468,11 +1440,7 @@ mod tests {
             Ok((
                 &b""[..],
                 ColorFinish::Material(MaterialFinish::Glitter(GlitterMaterial {
-                    value: Color {
-                        red: 0x12,
-                        green: 0x34,
-                        blue: 0x56
-                    },
+                    value: Color::new(0x12, 0x34, 0x56),
                     alpha: None,
                     luminance: None,
                     surface_fraction: 1.0,
@@ -1495,11 +1463,7 @@ mod tests {
             Ok((
                 &b""[..],
                 ColorFinish::Material(MaterialFinish::Speckle(SpeckleMaterial {
-                    value: Color {
-                        red: 0x12,
-                        green: 0x34,
-                        blue: 0x56
-                    },
+                    value: Color::new(0x12, 0x34, 0x56),
                     alpha: None,
                     luminance: None,
                     surface_fraction: 1.0,
@@ -1512,11 +1476,7 @@ mod tests {
             Ok((
                 &b""[..],
                 ColorFinish::Material(MaterialFinish::Speckle(SpeckleMaterial {
-                    value: Color {
-                        red: 0x12,
-                        green: 0x34,
-                        blue: 0x56
-                    },
+                    value: Color::new(0x12, 0x34, 0x56),
                     alpha: Some(128),
                     luminance: None,
                     surface_fraction: 1.0,
@@ -1529,11 +1489,7 @@ mod tests {
             Ok((
                 &b""[..],
                 ColorFinish::Material(MaterialFinish::Speckle(SpeckleMaterial {
-                    value: Color {
-                        red: 0x12,
-                        green: 0x34,
-                        blue: 0x56
-                    },
+                    value: Color::new(0x12, 0x34, 0x56),
                     alpha: None,
                     luminance: Some(32),
                     surface_fraction: 1.0,
@@ -1546,11 +1502,7 @@ mod tests {
             Ok((
                 &b""[..],
                 ColorFinish::Material(MaterialFinish::Speckle(SpeckleMaterial {
-                    value: Color {
-                        red: 0x12,
-                        green: 0x34,
-                        blue: 0x56
-                    },
+                    value: Color::new(0x12, 0x34, 0x56),
                     alpha: None,
                     luminance: None,
                     surface_fraction: 1.0,
@@ -1630,16 +1582,8 @@ mod tests {
                 Command::Colour(ColourCmd {
                     name: "test_col".to_string(),
                     code: 20,
-                    value: Color {
-                        red: 0x12,
-                        green: 0x34,
-                        blue: 0x56
-                    },
-                    edge: Color {
-                        red: 0xAB,
-                        green: 0xCD,
-                        blue: 0xEF
-                    },
+                    value: Color::new(0x12, 0x34, 0x56),
+                    edge: Color::new(0xAB, 0xCD, 0xEF),
                     alpha: None,
                     luminance: None,
                     finish: None
@@ -1653,16 +1597,8 @@ mod tests {
                 Command::Colour(ColourCmd {
                     name: "test_col".to_string(),
                     code: 20,
-                    value: Color {
-                        red: 0x12,
-                        green: 0x34,
-                        blue: 0x56
-                    },
-                    edge: Color {
-                        red: 0xAB,
-                        green: 0xCD,
-                        blue: 0xEF
-                    },
+                    value: Color::new(0x12, 0x34, 0x56),
+                    edge: Color::new(0xAB, 0xCD, 0xEF),
                     alpha: Some(128),
                     luminance: None,
                     finish: None
@@ -1676,16 +1612,8 @@ mod tests {
                 Command::Colour(ColourCmd {
                     name: "test_col".to_string(),
                     code: 20,
-                    value: Color {
-                        red: 0x12,
-                        green: 0x34,
-                        blue: 0x56
-                    },
-                    edge: Color {
-                        red: 0xAB,
-                        green: 0xCD,
-                        blue: 0xEF
-                    },
+                    value: Color::new(0x12, 0x34, 0x56),
+                    edge: Color::new(0xAB, 0xCD, 0xEF),
                     alpha: None,
                     luminance: Some(32),
                     finish: None
@@ -1701,16 +1629,8 @@ mod tests {
                 Command::Colour(ColourCmd {
                     name: "test_col".to_string(),
                     code: 20,
-                    value: Color {
-                        red: 0x12,
-                        green: 0x34,
-                        blue: 0x56
-                    },
-                    edge: Color {
-                        red: 0xAB,
-                        green: 0xCD,
-                        blue: 0xEF
-                    },
+                    value: Color::new(0x12, 0x34, 0x56),
+                    edge: Color::new(0xAB, 0xCD, 0xEF),
                     alpha: Some(64),
                     luminance: Some(32),
                     finish: None
@@ -1724,16 +1644,8 @@ mod tests {
                 Command::Colour(ColourCmd {
                     name: "test_col".to_string(),
                     code: 20,
-                    value: Color {
-                        red: 0x12,
-                        green: 0x34,
-                        blue: 0x56
-                    },
-                    edge: Color {
-                        red: 0xAB,
-                        green: 0xCD,
-                        blue: 0xEF
-                    },
+                    value: Color::new(0x12, 0x34, 0x56),
+                    edge: Color::new(0xAB, 0xCD, 0xEF),
                     alpha: None,
                     luminance: None,
                     finish: Some(ColorFinish::Chrome)
@@ -1747,16 +1659,8 @@ mod tests {
                 Command::Colour(ColourCmd {
                     name: "test_col".to_string(),
                     code: 20,
-                    value: Color {
-                        red: 0x12,
-                        green: 0x34,
-                        blue: 0x56
-                    },
-                    edge: Color {
-                        red: 0xAB,
-                        green: 0xCD,
-                        blue: 0xEF
-                    },
+                    value: Color::new(0x12, 0x34, 0x56),
+                    edge: Color::new(0xAB, 0xCD, 0xEF),
                     alpha: Some(128),
                     luminance: None,
                     finish: Some(ColorFinish::Rubber)
@@ -1769,47 +1673,19 @@ mod tests {
     fn test_vec3() {
         assert_eq!(
             read_vec3(b"0 0 0"),
-            Ok((
-                &b""[..],
-                Vec3 {
-                    x: 0.,
-                    y: 0.,
-                    z: 0.
-                }
-            ))
+            Ok((&b""[..], Vec3::new(0.0, 0.0, 0.0)))
         );
         assert_eq!(
             read_vec3(b"0 0 0 1"),
-            Ok((
-                &b" 1"[..],
-                Vec3 {
-                    x: 0.,
-                    y: 0.,
-                    z: 0.
-                }
-            ))
+            Ok((&b" 1"[..], Vec3::new(0.0, 0.0, 0.0)))
         );
         assert_eq!(
             read_vec3(b"2 5 -7"),
-            Ok((
-                &b""[..],
-                Vec3 {
-                    x: 2.,
-                    y: 5.,
-                    z: -7.
-                }
-            ))
+            Ok((&b""[..], Vec3::new(2.0, 5.0, -7.0)))
         );
         assert_eq!(
             read_vec3(b"2.3 5 -7.4"),
-            Ok((
-                &b""[..],
-                Vec3 {
-                    x: 2.3,
-                    y: 5.,
-                    z: -7.4
-                }
-            ))
+            Ok((&b""[..], Vec3::new(2.3, 5.0, -7.4)))
         );
     }
 
@@ -1925,9 +1801,7 @@ mod tests {
     #[test]
     fn test_comment_cmd() {
         let comment = b"test of comment, with \"weird\" characters";
-        let res = Command::Comment(CommentCmd {
-            text: std::str::from_utf8(comment).unwrap().to_string(),
-        });
+        let res = Command::Comment(CommentCmd::new(std::str::from_utf8(comment).unwrap()));
         assert_eq!(meta_cmd(comment), Ok((&b""[..], res)));
     }
 
@@ -2021,9 +1895,7 @@ mod tests {
 
     #[test]
     fn test_read_cmd() {
-        let res = Command::Comment(CommentCmd {
-            text: "this doesn't matter".to_string(),
-        });
+        let res = Command::Comment(CommentCmd::new("this doesn't matter"));
         assert_eq!(read_line(b"0 this doesn't matter"), Ok((&b""[..], res)));
     }
 
@@ -2180,9 +2052,7 @@ mod tests {
 
     #[test]
     fn test_parse_raw() {
-        let cmd0 = Command::Comment(CommentCmd {
-            text: "this is a comment".to_string(),
-        });
+        let cmd0 = Command::Comment(CommentCmd::new("this is a comment"));
         let cmd1 = Command::Line(LineCmd {
             color: 16,
             vertices: [
@@ -2203,9 +2073,7 @@ mod tests {
             vec![cmd0, cmd1]
         );
 
-        let cmd0 = Command::Comment(CommentCmd {
-            text: "this doesn't matter".to_string(),
-        });
+        let cmd0 = Command::Comment(CommentCmd::new("this doesn't matter"));
         let cmd1 = Command::SubFileRef(SubFileRefCmd {
             color: 16,
             pos: Vec3 {
@@ -2236,9 +2104,7 @@ mod tests {
             vec![cmd0, cmd1]
         );
 
-        let cmd0 = Command::Comment(CommentCmd {
-            text: "this doesn't \"matter\"".to_string(),
-        });
+        let cmd0 = Command::Comment(CommentCmd::new("this doesn't \"matter\""));
         let cmd1 = Command::SubFileRef(SubFileRefCmd {
             color: 16,
             pos: Vec3 {
