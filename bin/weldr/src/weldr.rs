@@ -364,8 +364,8 @@ fn convert(app: &mut App, input: PathBuf) -> Result<(), Error> {
 
     eprintln!("Parsing file '{}'", input);
     let resolver = DiskResolver::new_from_root("F:\\dev\\weldr\\data");
-    let mut source_map = HashMap::new();
-    let source_file = weldr::parse(input, &resolver, &mut source_map)?;
+    let mut source_map = weldr::SourceMap::new();
+    let source_file_ref = weldr::parse(input, &resolver, &mut source_map)?;
 
     eprintln!("Converting file '{}' to {} format", input, "gltf");
     let mut geometry_cache = GeometryCache {
@@ -373,7 +373,8 @@ fn convert(app: &mut App, input: PathBuf) -> Result<(), Error> {
         indices: vec![],
         vertex_map: HashMap::new(),
     };
-    for cmd in &source_file.borrow().cmds {
+    let source_file = source_file_ref.get(&source_map);
+    for cmd in source_file.iter(&source_map) {
         eprintln!("  cmd: {:?}", cmd);
         match cmd {
             CommandType::Line(l) => geometry_cache.add_line(&l.vertices),

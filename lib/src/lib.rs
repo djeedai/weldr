@@ -84,10 +84,8 @@ use nom::{
     IResult, InputTakeAtPosition,
 };
 use std::{
-    cell::RefCell,
     collections::{HashMap, HashSet},
     num::ParseIntError,
-    rc::Rc,
     str::{self, from_utf8, FromStr},
 };
 
@@ -608,7 +606,7 @@ struct QueuedFileRef {
     /// Filename of unresolved source file.
     filename: String,
     /// Referer source file which requested the resolution.
-    referer: Rc<RefCell<SourceFile>>,
+    referer: SourceFileRef,
 }
 
 struct ResolveQueue {
@@ -626,7 +624,7 @@ impl ResolveQueue {
         };
     }
 
-    fn push(&mut self, filename: &str, referer_filename: &str, referer: Rc<RefCell<SourceFile>>) {
+    fn push(&mut self, filename: &str, referer_filename: &str, referer: SourceFileRef) {
         if let Some(num_pending) = self.pending_count.get_mut(referer_filename) {
             assert!(*num_pending > 0); // should not make it to the queue if already resolved
             *num_pending += 1;
@@ -639,12 +637,12 @@ impl ResolveQueue {
         });
     }
 
-    fn pop(&mut self) -> Option<(QueuedFileRef, u32)> {
+    fn pop(&mut self, source_map: &SourceMap) -> Option<(QueuedFileRef, u32)> {
         match self.queue.pop() {
             Some(qfr) => {
                 let num_pending = self
                     .pending_count
-                    .get_mut(&qfr.referer.borrow().filename)
+                    .get_mut(&qfr.referer.get(source_map).filename)
                     .unwrap();
                 *num_pending -= 1;
                 Some((qfr, *num_pending))
@@ -656,47 +654,6 @@ impl ResolveQueue {
     fn reset(&mut self) {
         self.queue.clear();
         self.pending_count.clear();
-    }
-}
-
-fn resolve_file_refs(
-    source_file: Rc<RefCell<SourceFile>>,
-    queue: &mut ResolveQueue,
-    source_map: &mut HashMap<String, Rc<RefCell<SourceFile>>>,
-) {
-    let referer_filename = source_file.borrow().filename.clone();
-    let mut subfile_set = HashSet::new();
-    for cmd in &mut source_file.borrow_mut().cmds {
-        if let CommandType::SubFileRef(sfr_cmd) = cmd {
-            // All subfile refs come out of parse_raw() as unresolved by definition,
-            // since parse_raw() doesn't have access to the source map nor the resolver.
-            // See if we can resolve some of them now.
-            if let SubFileRef::UnresolvedRef(subfilename) = &sfr_cmd.file {
-                // Check the source map
-                let subfilename = subfilename.to_string();
-                if let Some(existing_source_file) = source_map.get(&subfilename) {
-                    // If already parsed, reuse
-                    println!(
-                        "Updating resolved subfile ref in {} -> {}",
-                        referer_filename, subfilename
-                    );
-                    sfr_cmd.file = SubFileRef::ResolvedRef(Rc::clone(existing_source_file));
-                } else if subfile_set.contains(&subfilename) {
-                    println!(
-                        "Ignoring already-queued unresolved subfile ref in {} -> {}",
-                        referer_filename, subfilename
-                    );
-                } else {
-                    // If not, push to queue for later parsing, but only once
-                    println!(
-                        "Queuing unresolved subfile ref in {} -> {}",
-                        referer_filename, subfilename
-                    );
-                    queue.push(&subfilename[..], &referer_filename[..], source_file.clone());
-                    subfile_set.insert(subfilename);
-                }
-            }
-        }
     }
 }
 
@@ -724,8 +681,7 @@ fn load_and_parse_single_file(
 /// up populating the given `source_map`, which can be pre-populated manually or from a
 /// previous call with already loaded and parsed files.
 /// ```rust
-/// use weldr::{ FileRefResolver, parse, ResolveError };
-/// use std::collections::HashMap;
+/// use weldr::{ FileRefResolver, parse, ResolveError, SourceMap };
 ///
 /// struct MyCustomResolver {};
 ///
@@ -737,60 +693,58 @@ fn load_and_parse_single_file(
 ///
 /// fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///   let resolver = MyCustomResolver{};
-///   let mut source_map = HashMap::new();
-///   let root_file = parse("root.ldr", &resolver, &mut source_map)?;
-///   assert_eq!(root_file.borrow().filename, "root.ldr");
+///   let mut source_map = SourceMap::new();
+///   let root_file_ref = parse("root.ldr", &resolver, &mut source_map)?;
+///   let root_file = root_file_ref.get(&source_map);
+///   assert_eq!(root_file.filename, "root.ldr");
 ///   Ok(())
 /// }
 /// ```
 pub fn parse(
     filename: &str,
     resolver: &dyn FileRefResolver,
-    source_map: &mut HashMap<String, Rc<RefCell<SourceFile>>>,
-) -> Result<Rc<RefCell<SourceFile>>, Error> {
-    if let Some(existing_file) = source_map.get(filename) {
-        return Ok(Rc::clone(existing_file));
+    source_map: &mut SourceMap,
+) -> Result<SourceFileRef, Error> {
+    if let Some(existing_file) = source_map.find_filename(filename) {
+        return Ok(existing_file);
     }
-    let mut queue = ResolveQueue::new();
     println!("Loading root file: {}", filename);
     let root_file = load_and_parse_single_file(filename, resolver)?;
-    let root_file = Rc::new(RefCell::new(root_file));
-    {
-        println!(
-            "Post-loading resolving subfile refs of root file: {}",
-            filename
-        );
-        resolve_file_refs(Rc::clone(&root_file), &mut queue, source_map);
-    }
-    source_map.insert(filename.to_string(), Rc::clone(&root_file));
-    while let Some(queued_file) = queue.pop() {
+    println!(
+        "Post-loading resolving subfile refs of root file: {}",
+        filename
+    );
+    let root_file_ref = source_map.insert(root_file);
+    let mut queue = ResolveQueue::new();
+    source_map.resolve_file_refs(root_file_ref, &mut queue);
+    while let Some(queued_file) = queue.pop(source_map) {
         let num_pending_left = queued_file.1;
         let filename = &queued_file.0.filename;
         println!("Dequeuing sub-file: {}", filename);
-        if source_map.contains_key(filename) {
-            println!("Already parsed; reusing sub-file: {}", filename);
-        } else {
-            println!("Not yet parsed; parsing sub-file: {}", filename);
-            let source_file = load_and_parse_single_file(&filename[..], resolver)?;
-            let subfile = Rc::new(RefCell::new(source_file));
-            println!(
-                "Post-loading resolving subfile refs of sub-file: {}",
-                filename
-            );
-            resolve_file_refs(Rc::clone(&subfile), &mut queue, source_map);
-            source_map.insert(filename.clone(), Rc::clone(&subfile));
+        match source_map.find_filename(filename) {
+            Some(_) => println!("Already parsed; reusing sub-file: {}", filename),
+            None => {
+                println!("Not yet parsed; parsing sub-file: {}", filename);
+                let source_file = load_and_parse_single_file(&filename[..], resolver)?;
+                let source_file_ref = source_map.insert(source_file);
+                println!(
+                    "Post-loading resolving subfile refs of sub-file: {}",
+                    filename
+                );
+                source_map.resolve_file_refs(source_file_ref, &mut queue);
+            }
         }
         // Re-resolve the source file that triggered this sub-file loading to update its subfile refs
         // if there is no more sub-file references enqueued.
         if num_pending_left == 0 {
             println!(
                 "Re-resolving referer file on last resolved ref: {}",
-                queued_file.0.referer.borrow().filename
+                queued_file.0.referer.get(source_map).filename
             );
-            resolve_file_refs(queued_file.0.referer, &mut queue, source_map);
+            source_map.resolve_file_refs(queued_file.0.referer, &mut queue);
         }
     }
-    Ok(root_file)
+    Ok(root_file_ref)
 }
 
 /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
@@ -911,11 +865,116 @@ pub struct SourceFile {
     pub cmds: Vec<CommandType>,
 }
 
+#[derive(Debug)]
+pub struct SourceMap {
+    source_files: Vec<SourceFile>,
+    filename_map: HashMap<String, usize>,
+}
+
+#[derive(Debug, Copy, Clone, Default, PartialEq, PartialOrd, Eq, Ord, Hash)]
+pub struct SourceFileRef {
+    index: usize,
+    // TODO: ref to SourceMap?
+}
+
+impl SourceFileRef {
+    pub fn get<'a>(&'a self, source_map: &'a SourceMap) -> &'a SourceFile {
+        source_map.get(*self)
+    }
+}
+
+impl SourceMap {
+    pub fn new() -> SourceMap {
+        SourceMap {
+            source_files: vec![],
+            filename_map: HashMap::new(),
+        }
+    }
+
+    fn get(&self, source_file_ref: SourceFileRef) -> &SourceFile {
+        &self.source_files[source_file_ref.index]
+    }
+
+    fn get_mut(&mut self, source_file_ref: SourceFileRef) -> &mut SourceFile {
+        &mut self.source_files[source_file_ref.index]
+    }
+
+    fn find_filename(&self, filename: &str) -> Option<SourceFileRef> {
+        match self.filename_map.get(filename) {
+            Some(&index) => Some(SourceFileRef { index }),
+            None => None,
+        }
+    }
+
+    fn insert(&mut self, source_file: SourceFile) -> SourceFileRef {
+        if let Some(&index) = self.filename_map.get(&source_file.filename) {
+            return SourceFileRef { index };
+        } else {
+            let index = self.source_files.len();
+            self.filename_map
+                .insert(source_file.filename.clone(), index);
+            self.source_files.push(source_file);
+            return SourceFileRef { index };
+        }
+    }
+
+    fn resolve_file_refs(&mut self, source_file_ref: SourceFileRef, queue: &mut ResolveQueue) {
+        // Steal filename map to decouple its lifetime from the one of the source files vector,
+        // and allow lookup while mutably iterating over the source files and their commands
+        let mut filename_map = HashMap::new();
+        std::mem::swap(&mut filename_map, &mut self.filename_map);
+
+        // Iterate over the commands of the current file and try to enqueue all its unresolved
+        // sub-file reference commands for deferred resolution.
+        let source_file = self.get_mut(source_file_ref);
+        let referer_filename = source_file.filename.clone();
+        let mut subfile_set = HashSet::new();
+        for cmd in &mut source_file.cmds {
+            if let CommandType::SubFileRef(sfr_cmd) = cmd {
+                // All subfile refs come out of parse_raw() as unresolved by definition,
+                // since parse_raw() doesn't have access to the source map nor the resolver.
+                // See if we can resolve some of them now.
+                if let SubFileRef::UnresolvedRef(subfilename) = &sfr_cmd.file {
+                    let subfilename = subfilename.clone();
+                    // Check the source map
+                    if let Some(existing_source_file) = filename_map
+                        .get(&subfilename)
+                        .map(|&index| SourceFileRef { index })
+                    {
+                        // If already parsed, reuse
+                        println!(
+                            "Updating resolved subfile ref in {} -> {}",
+                            referer_filename, subfilename
+                        );
+                        sfr_cmd.file = SubFileRef::ResolvedRef(existing_source_file);
+                    } else if subfile_set.contains(&subfilename) {
+                        println!(
+                            "Ignoring already-queued unresolved subfile ref in {} -> {}",
+                            referer_filename, subfilename
+                        );
+                    } else {
+                        // If not, push to queue for later parsing, but only once
+                        println!(
+                            "Queuing unresolved subfile ref in {} -> {}",
+                            referer_filename, subfilename
+                        );
+                        queue.push(&subfilename[..], &referer_filename[..], source_file_ref);
+                        subfile_set.insert(subfilename);
+                    }
+                }
+            }
+        }
+
+        // Restore the filename map
+        std::mem::swap(&mut filename_map, &mut self.filename_map);
+    }
+}
+
 /// Reference to a sub-file from inside another file.
 #[derive(Debug, PartialEq)]
 pub enum SubFileRef {
     /// Resolved reference pointing to the given loaded/parsed sub-file.
-    ResolvedRef(Rc<RefCell<SourceFile>>),
+    ResolvedRef(SourceFileRef),
     /// Unresolved reference containing the raw reference filename.
     UnresolvedRef(String),
 }
