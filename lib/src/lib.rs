@@ -618,14 +618,14 @@ struct ResolveQueue {
 
 /// Iterator over all drawing commands of a [`SourceFile`] and all its referenced sub-files.
 /// Sub-file reference commands are not yielded, but instead the drawing commands of those
-/// sub-files are iterated over.
+/// sub-files are iterated over. Comment commands are skipped.
 pub struct CommandIterator<'a> {
     stack: Vec<(&'a SourceFile, usize)>,
     source_map: &'a SourceMap,
 }
 
-/// Iterator over all local commands of a [`SourceFile`] only. Sub-file reference commands are
-/// yielded like all other commands. No command from any other file is yielded.
+/// Iterator over all local commands of a [`SourceFile`] only. Sub-file reference commands and
+/// comment commands are yielded like all other commands. No command from any other file is yielded.
 pub struct LocalCommandIterator<'a> {
     stack: Vec<&'a SourceFile>,
     index: usize,
@@ -646,7 +646,7 @@ pub struct LocalCommandIterator<'a> {
 
 impl SourceFile {
     /// Return an iterator over all drawing commands, recursively stepping into sub-file references
-    /// without returning the corresponding [`SubFileRefCmd`] command.
+    /// without returning the corresponding [`SubFileRefCmd`] command nor any comment command.
     pub fn iter<'a>(&'a self, source_map: &'a SourceMap) -> CommandIterator<'a> {
         CommandIterator {
             stack: vec![(&self, 0)],
@@ -654,8 +654,9 @@ impl SourceFile {
         }
     }
 
-    /// Return an iterator over all commands local to this source file, including sub-file references.
-    /// Unlike [`SourceFile::iter()`], this doesn't step into those sub-file references but stay in the local source file.
+    /// Return an iterator over all commands local to this source file, including sub-file references
+    /// and comments. Unlike [`SourceFile::iter()`], this doesn't step into those sub-file references
+    /// but remains in the local source file.
     pub fn local_iter<'a>(&'a self, source_map: &'a SourceMap) -> LocalCommandIterator<'a> {
         LocalCommandIterator {
             stack: vec![&self],
@@ -681,6 +682,9 @@ impl<'a> Iterator for CommandIterator<'a> {
                         self.stack.push((source_file_2, 0));
                         continue;
                     }
+                } else if let CommandType::Comment(_) = &cmd {
+                    // Skip comments
+                    continue;
                 }
                 return Some(cmd);
             }
