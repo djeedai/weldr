@@ -18,17 +18,17 @@ use std::{
     path::{Path, PathBuf},
 };
 use structopt::StructOpt;
-use weldr::{CommandType, FileRefResolver, ResolveError, Vec3};
+use weldr::{Command, FileRefResolver, ResolveError, Vec3};
 
 #[derive(StructOpt)]
 #[structopt(name = "weldr", author = "Jerome Humbert <djeedai@gmail.com>")]
 struct CliArgs {
     #[structopt(subcommand)]
-    cmd: Command,
+    cmd: Cmd,
 }
 
 #[derive(StructOpt)]
-enum Command {
+enum Cmd {
     Convert(ConvertCommand),
 }
 
@@ -377,10 +377,10 @@ fn convert(app: &mut App, input: PathBuf) -> Result<(), Error> {
     for cmd in source_file.iter(&source_map) {
         eprintln!("  cmd: {:?}", cmd);
         match cmd {
-            CommandType::Line(l) => geometry_cache.add_line(&l.vertices),
-            CommandType::Triangle(t) => geometry_cache.add_triangle(&t.vertices),
-            CommandType::Quad(q) => geometry_cache.add_quad(&q.vertices),
-            CommandType::OptLine(l) => geometry_cache.add_line(&l.vertices),
+            Command::Line(l) => geometry_cache.add_line(&l.vertices),
+            Command::Triangle(t) => geometry_cache.add_triangle(&t.vertices),
+            Command::Quad(q) => geometry_cache.add_quad(&q.vertices),
+            Command::OptLine(l) => geometry_cache.add_line(&l.vertices),
             _ => {}
         }
     }
@@ -403,7 +403,7 @@ fn main() -> Result<(), Error> {
     };
 
     let res = match args.cmd {
-        Command::Convert(conv) => convert(&mut app, conv.input),
+        Cmd::Convert(conv) => convert(&mut app, conv.input),
     };
     if let Err(e) = res {
         match e {

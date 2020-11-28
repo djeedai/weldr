@@ -1,8 +1,6 @@
 extern crate weldr;
 
-use weldr::{
-    error::ResolveError, CommandType, FileRefResolver, SourceFileRef, SourceMap, SubFileRef,
-};
+use weldr::{error::ResolveError, Command, FileRefResolver, SourceFileRef, SourceMap, SubFileRef};
 
 use std::collections::HashMap;
 
@@ -10,7 +8,7 @@ fn print_rec(source_map: &SourceMap, source_file_ref: SourceFileRef, indent: usi
     let source_file = source_file_ref.get(source_map);
     println!("{}{}", " ".repeat(indent), source_file.filename);
     for cmd in &source_file.cmds {
-        if let CommandType::SubFileRef(sfr_cmd) = cmd {
+        if let Command::SubFileRef(sfr_cmd) = cmd {
             match &sfr_cmd.file {
                 SubFileRef::ResolvedRef(resolved_file) => {
                     print_rec(source_map, *resolved_file, indent + 2);
@@ -53,9 +51,9 @@ impl FileRefResolver for MemoryResolver {
 }
 
 /// Get the sub-file reference command out of a given command.
-fn get_resolved_subfile_ref(cmd: &CommandType) -> Option<SourceFileRef> {
+fn get_resolved_subfile_ref(cmd: &Command) -> Option<SourceFileRef> {
     match cmd {
-        CommandType::SubFileRef(sfr_cmd) => match &sfr_cmd.file {
+        Command::SubFileRef(sfr_cmd) => match &sfr_cmd.file {
             SubFileRef::ResolvedRef(source_file_ref) => Some(*source_file_ref),
             _ => None,
         },
