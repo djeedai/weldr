@@ -232,18 +232,21 @@ impl Asset {
     }
 
     #[inline(always)]
+    #[cfg(not(tarpaulin_include))] // tarpaulin doesn't understand inline I think
     pub fn min_version(mut self, min_version: &str) -> Self {
         self.min_version = Some(min_version.to_string());
         self
     }
 
     #[inline(always)]
+    #[cfg(not(tarpaulin_include))] // tarpaulin doesn't understand inline I think
     pub fn generator(mut self, generator: &str) -> Self {
         self.generator = Some(generator.to_string());
         self
     }
 
     #[inline(always)]
+    #[cfg(not(tarpaulin_include))] // tarpaulin doesn't understand inline I think
     pub fn copyright(mut self, copyright: &str) -> Self {
         self.copyright = Some(copyright.to_string());
         self

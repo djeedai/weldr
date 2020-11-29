@@ -412,6 +412,7 @@ fn convert(app: &mut App, input: PathBuf) -> Result<(), Error> {
     geometry_cache.write(&json_path)
 }
 
+#[cfg(not(tarpaulin_include))]
 fn main() -> Result<(), Error> {
     let args = CliArgs::from_args();
     let mut app = App {
@@ -486,5 +487,36 @@ mod tests {
             cli: CliArgs::clap(),
         };
         app.exit(0);
+    }
+
+    #[test]
+    fn test_disk_resolver_new() {
+        assert!(DiskResolver::new().base_paths.is_empty())
+    }
+
+    #[test]
+    fn test_disk_resolver_new_from_root() {
+        let resolver = DiskResolver::new_from_root("root");
+        assert_eq!(4, resolver.base_paths.len());
+        assert!(resolver
+            .base_paths
+            .iter()
+            .find(|&p| { *p == Path::new("root").join("p") })
+            .is_some());
+        assert!(resolver
+            .base_paths
+            .iter()
+            .find(|&p| { *p == Path::new("root").join("p").join("48") })
+            .is_some());
+        assert!(resolver
+            .base_paths
+            .iter()
+            .find(|&p| { *p == Path::new("root").join("parts") })
+            .is_some());
+        assert!(resolver
+            .base_paths
+            .iter()
+            .find(|&p| { *p == Path::new("root").join("parts").join("s") })
+            .is_some());
     }
 }
