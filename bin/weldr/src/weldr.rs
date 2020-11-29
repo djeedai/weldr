@@ -57,18 +57,19 @@ struct App<'a, 'b> {
 }
 
 impl App<'_, '_> {
-    #[cfg(not(tarpaulin_include))]
+    #[cfg(not(tarpaulin_include))] // don't test function that exit process
     fn print_help_and_exit(&mut self) {
         let _ = self.cli.print_help();
         std::process::exit(1);
     }
 
-    #[cfg(not(tarpaulin_include))]
+    #[cfg(not(tarpaulin_include))] // don't test function that exit process
     fn print_error_and_exit(&self, msg: &str) {
         eprintln!("{}: {}", Red.paint("error"), msg);
         std::process::exit(1);
     }
 
+    #[cfg(not(tarpaulin_include))] // don't test function that exit process
     fn exit(&self, code: i32) {
         std::process::exit(code);
     }
@@ -482,14 +483,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_app_exit() {
-        let app = App {
-            cli: CliArgs::clap(),
-        };
-        app.exit(0);
-    }
-
-    #[test]
     fn test_disk_resolver_new() {
         assert!(DiskResolver::new().base_paths.is_empty())
     }
@@ -518,5 +511,13 @@ mod tests {
             .iter()
             .find(|&p| { *p == Path::new("root").join("parts").join("s") })
             .is_some());
+    }
+
+    #[test]
+    fn test_convert() -> Result<(), Error> {
+        let mut app = App {
+            cli: CliArgs::clap(),
+        };
+        convert(&mut app, Path::new("6143.dat").to_path_buf())
     }
 }
