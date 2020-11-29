@@ -758,74 +758,6 @@ impl<'a> Iterator for LocalCommandIterator<'a> {
     }
 }
 
-#[test]
-fn test_iter() {
-    let mut source_map = SourceMap::new();
-    let source_file = SourceFile {
-        filename: "tata".to_string(),
-        raw_content: vec![],
-        cmds: vec![Command::Triangle(TriangleCmd {
-            color: 2,
-            vertices: [
-                Vec3::new(0.0, 0.0, 0.0),
-                Vec3::new(1.0, 0.0, 0.0),
-                Vec3::new(0.0, 1.0, 0.0),
-            ],
-        })],
-    };
-    let source_file_ref = source_map.insert(source_file);
-    let s = SourceFile {
-        filename: "toto".to_string(),
-        raw_content: vec![],
-        cmds: vec![
-            Command::Triangle(TriangleCmd {
-                color: 16,
-                vertices: [
-                    Vec3::new(0.0, 0.0, 1.0),
-                    Vec3::new(1.0, 0.0, 1.0),
-                    Vec3::new(0.0, 1.0, 1.0),
-                ],
-            }),
-            Command::SubFileRef(SubFileRefCmd {
-                color: 24,
-                pos: Vec3::new(0.0, 0.0, 0.0),
-                row0: Vec3::new(0.0, 0.0, 0.0),
-                row1: Vec3::new(0.0, 0.0, 0.0),
-                row2: Vec3::new(0.0, 0.0, 0.0),
-                file: SubFileRef::ResolvedRef(source_file_ref),
-            }),
-            Command::Quad(QuadCmd {
-                color: 1,
-                vertices: [
-                    Vec3::new(0.0, 1.0, 0.0),
-                    Vec3::new(0.0, 1.0, 1.0),
-                    Vec3::new(1.0, 1.0, 1.0),
-                    Vec3::new(1.0, 1.0, 0.0),
-                ],
-            }),
-        ],
-    };
-    let source_file_ref = source_map.insert(s);
-    let source_file = source_file_ref.get(&source_map);
-    for c in source_file.iter(&source_map) {
-        println!("cmd: {:?}", c);
-    }
-    let cmds: Vec<_> = source_file.iter(&source_map).map(|(_, cmd)| cmd).collect();
-    assert_eq!(3, cmds.len());
-    match &cmds[0] {
-        Command::Triangle(tri_cmd) => assert_eq!(16, tri_cmd.color),
-        _ => panic!(),
-    }
-    match &cmds[1] {
-        Command::Triangle(tri_cmd) => assert_eq!(2, tri_cmd.color),
-        _ => panic!(),
-    }
-    match &cmds[2] {
-        Command::Quad(quad_cmd) => assert_eq!(1, quad_cmd.color),
-        _ => panic!(),
-    }
-}
-
 impl ResolveQueue {
     fn new() -> ResolveQueue {
         return ResolveQueue {
@@ -1328,6 +1260,20 @@ mod tests {
         assert_eq!(color_id(b""), Err(Err::Error((&b""[..], ErrorKind::Digit))));
         assert_eq!(color_id(b"1"), Ok((&b""[..], 1)));
         assert_eq!(color_id(b"16 "), Ok((&b" "[..], 16)));
+    }
+
+    #[test]
+    fn test_from_hex() {
+        assert_eq!(from_hex(b"0"), Ok(0));
+        assert_eq!(from_hex(b"1"), Ok(1));
+        assert_eq!(from_hex(b"a"), Ok(10));
+        assert_eq!(from_hex(b"F"), Ok(15));
+        assert_eq!(from_hex(b"G"), Err(ErrorKind::AlphaNumeric));
+        assert_eq!(from_hex(b"10"), Ok(16));
+        assert_eq!(from_hex(b"FF"), Ok(255));
+        assert_eq!(from_hex(b"1G"), Err(ErrorKind::AlphaNumeric));
+        assert_eq!(from_hex(b"100"), Err(ErrorKind::AlphaNumeric));
+        assert_eq!(from_hex(b"\xFF"), Err(ErrorKind::AlphaNumeric));
     }
 
     #[test]
@@ -1881,26 +1827,10 @@ mod tests {
     fn test_file_ref_cmd() {
         let res = Command::SubFileRef(SubFileRefCmd {
             color: 16,
-            pos: Vec3 {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            row0: Vec3 {
-                x: 1.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            row1: Vec3 {
-                x: 0.0,
-                y: 1.0,
-                z: 0.0,
-            },
-            row2: Vec3 {
-                x: 0.0,
-                y: 0.0,
-                z: 1.0,
-            },
+            pos: Vec3::new(0.0, 0.0, 0.0),
+            row0: Vec3::new(1.0, 0.0, 0.0),
+            row1: Vec3::new(0.0, 1.0, 0.0),
+            row2: Vec3::new(0.0, 0.0, 1.0),
             file: SubFileRef::UnresolvedRef("aaaaaaddd".to_string()),
         });
         assert_eq!(
@@ -1975,18 +1905,7 @@ mod tests {
     fn test_read_line_cmd() {
         let res = Command::Line(LineCmd {
             color: 16,
-            vertices: [
-                Vec3 {
-                    x: 1.0,
-                    y: 1.0,
-                    z: 0.0,
-                },
-                Vec3 {
-                    x: 0.9239,
-                    y: 1.0,
-                    z: 0.3827,
-                },
-            ],
+            vertices: [Vec3::new(1.0, 1.0, 0.0), Vec3::new(0.9239, 1.0, 0.3827)],
         });
         assert_eq!(
             read_line(b"2 16 1 1 0 0.9239 1 0.3827"),
@@ -1999,21 +1918,9 @@ mod tests {
         let res = Command::Triangle(TriangleCmd {
             color: 16,
             vertices: [
-                Vec3 {
-                    x: 1.0,
-                    y: 1.0,
-                    z: 0.0,
-                },
-                Vec3 {
-                    x: 0.9239,
-                    y: 1.0,
-                    z: 0.3827,
-                },
-                Vec3 {
-                    x: 0.9239,
-                    y: 0.0,
-                    z: 0.3827,
-                },
+                Vec3::new(1.0, 1.0, 0.0),
+                Vec3::new(0.9239, 1.0, 0.3827),
+                Vec3::new(0.9239, 0.0, 0.3827),
             ],
         });
         assert_eq!(
@@ -2027,26 +1934,10 @@ mod tests {
         let res = Command::Quad(QuadCmd {
             color: 16,
             vertices: [
-                Vec3 {
-                    x: 1.0,
-                    y: 1.0,
-                    z: 0.0,
-                },
-                Vec3 {
-                    x: 0.9239,
-                    y: 1.0,
-                    z: 0.3827,
-                },
-                Vec3 {
-                    x: 0.9239,
-                    y: 0.0,
-                    z: 0.3827,
-                },
-                Vec3 {
-                    x: 1.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
+                Vec3::new(1.0, 1.0, 0.0),
+                Vec3::new(0.9239, 1.0, 0.3827),
+                Vec3::new(0.9239, 0.0, 0.3827),
+                Vec3::new(1.0, 0.0, 0.0),
             ],
         });
         assert_eq!(
@@ -2059,30 +1950,8 @@ mod tests {
     fn test_read_opt_line_cmd() {
         let res = Command::OptLine(OptLineCmd {
             color: 16,
-            vertices: [
-                Vec3 {
-                    x: 1.0,
-                    y: 1.0,
-                    z: 0.0,
-                },
-                Vec3 {
-                    x: 0.9239,
-                    y: 1.0,
-                    z: 0.3827,
-                },
-            ],
-            control_points: [
-                Vec3 {
-                    x: 0.9239,
-                    y: 0.0,
-                    z: 0.3827,
-                },
-                Vec3 {
-                    x: 1.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
-            ],
+            vertices: [Vec3::new(1.0, 1.0, 0.0), Vec3::new(0.9239, 1.0, 0.3827)],
+            control_points: [Vec3::new(0.9239, 0.0, 0.3827), Vec3::new(1.0, 0.0, 0.0)],
         });
         assert_eq!(
             read_line(b"5 16 1 1 0 0.9239 1 0.3827 0.9239 0 0.3827 1 0 0"),
@@ -2094,26 +1963,10 @@ mod tests {
     fn test_read_line_subfileref() {
         let res = Command::SubFileRef(SubFileRefCmd {
             color: 16,
-            pos: Vec3 {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            row0: Vec3 {
-                x: 1.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            row1: Vec3 {
-                x: 0.0,
-                y: 1.0,
-                z: 0.0,
-            },
-            row2: Vec3 {
-                x: 0.0,
-                y: 0.0,
-                z: 1.0,
-            },
+            pos: Vec3::new(0.0, 0.0, 0.0),
+            row0: Vec3::new(1.0, 0.0, 0.0),
+            row1: Vec3::new(0.0, 1.0, 0.0),
+            row2: Vec3::new(0.0, 0.0, 1.0),
             file: SubFileRef::UnresolvedRef("aa/aaaaddd".to_string()),
         });
         assert_eq!(
@@ -2127,18 +1980,7 @@ mod tests {
         let cmd0 = Command::Comment(CommentCmd::new("this is a comment"));
         let cmd1 = Command::Line(LineCmd {
             color: 16,
-            vertices: [
-                Vec3 {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
-                Vec3 {
-                    x: 1.0,
-                    y: 1.0,
-                    z: 1.0,
-                },
-            ],
+            vertices: [Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 1.0)],
         });
         assert_eq!(
             parse_raw(b"0 this is a comment\n2 16 0 0 0 1 1 1").unwrap(),
@@ -2148,26 +1990,10 @@ mod tests {
         let cmd0 = Command::Comment(CommentCmd::new("this doesn't matter"));
         let cmd1 = Command::SubFileRef(SubFileRefCmd {
             color: 16,
-            pos: Vec3 {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            row0: Vec3 {
-                x: 1.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            row1: Vec3 {
-                x: 0.0,
-                y: 1.0,
-                z: 0.0,
-            },
-            row2: Vec3 {
-                x: 0.0,
-                y: 0.0,
-                z: 1.0,
-            },
+            pos: Vec3::new(0.0, 0.0, 0.0),
+            row0: Vec3::new(1.0, 0.0, 0.0),
+            row1: Vec3::new(0.0, 1.0, 0.0),
+            row2: Vec3::new(0.0, 0.0, 1.0),
             file: SubFileRef::UnresolvedRef("aa/aaaaddd".to_string()),
         });
         assert_eq!(
@@ -2179,26 +2005,10 @@ mod tests {
         let cmd0 = Command::Comment(CommentCmd::new("this doesn't \"matter\""));
         let cmd1 = Command::SubFileRef(SubFileRefCmd {
             color: 16,
-            pos: Vec3 {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            row0: Vec3 {
-                x: 1.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            row1: Vec3 {
-                x: 0.0,
-                y: 1.0,
-                z: 0.0,
-            },
-            row2: Vec3 {
-                x: 0.0,
-                y: 0.0,
-                z: 1.0,
-            },
+            pos: Vec3::new(0.0, 0.0, 0.0),
+            row0: Vec3::new(1.0, 0.0, 0.0),
+            row1: Vec3::new(0.0, 1.0, 0.0),
+            row2: Vec3::new(0.0, 0.0, 1.0),
             file: SubFileRef::UnresolvedRef("aa/aaaaddd".to_string()),
         });
         assert_eq!(
@@ -2211,50 +2021,18 @@ mod tests {
 
         let cmd0 = Command::SubFileRef(SubFileRefCmd {
             color: 16,
-            pos: Vec3 {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            row0: Vec3 {
-                x: 1.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            row1: Vec3 {
-                x: 0.0,
-                y: 1.0,
-                z: 0.0,
-            },
-            row2: Vec3 {
-                x: 0.0,
-                y: 0.0,
-                z: 1.0,
-            },
+            pos: Vec3::new(0.0, 0.0, 0.0),
+            row0: Vec3::new(1.0, 0.0, 0.0),
+            row1: Vec3::new(0.0, 1.0, 0.0),
+            row2: Vec3::new(0.0, 0.0, 1.0),
             file: SubFileRef::UnresolvedRef("aa/aaaaddd".to_string()),
         });
         let cmd1 = Command::SubFileRef(SubFileRefCmd {
             color: 16,
-            pos: Vec3 {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            row0: Vec3 {
-                x: 1.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            row1: Vec3 {
-                x: 0.0,
-                y: 1.0,
-                z: 0.0,
-            },
-            row2: Vec3 {
-                x: 0.0,
-                y: 0.0,
-                z: 1.0,
-            },
+            pos: Vec3::new(0.0, 0.0, 0.0),
+            row0: Vec3::new(1.0, 0.0, 0.0),
+            row1: Vec3::new(0.0, 1.0, 0.0),
+            row2: Vec3::new(0.0, 0.0, 1.0),
             file: SubFileRef::UnresolvedRef("aa/aaaaddd".to_string()),
         });
         assert_eq!(
@@ -2264,5 +2042,94 @@ mod tests {
             .unwrap(),
             vec![cmd0, cmd1]
         );
+    }
+
+    #[test]
+    fn test_source_file_iter() {
+        let mut source_map = SourceMap::new();
+        let source_file = SourceFile {
+            filename: "tata".to_string(),
+            raw_content: vec![],
+            cmds: vec![Command::Triangle(TriangleCmd {
+                color: 2,
+                vertices: [
+                    Vec3::new(0.0, 0.0, 0.0),
+                    Vec3::new(1.0, 0.0, 0.0),
+                    Vec3::new(0.0, 1.0, 0.0),
+                ],
+            })],
+        };
+        let source_file_ref = source_map.insert(source_file);
+        let s = SourceFile {
+            filename: "toto".to_string(),
+            raw_content: vec![],
+            cmds: vec![
+                Command::Triangle(TriangleCmd {
+                    color: 16,
+                    vertices: [
+                        Vec3::new(0.0, 0.0, 1.0),
+                        Vec3::new(1.0, 0.0, 1.0),
+                        Vec3::new(0.0, 1.0, 1.0),
+                    ],
+                }),
+                Command::Comment(CommentCmd::new("my comment")),
+                Command::SubFileRef(SubFileRefCmd {
+                    color: 24,
+                    pos: Vec3::new(0.0, 0.0, 0.0),
+                    row0: Vec3::new(0.0, 0.0, 0.0),
+                    row1: Vec3::new(0.0, 0.0, 0.0),
+                    row2: Vec3::new(0.0, 0.0, 0.0),
+                    file: SubFileRef::ResolvedRef(source_file_ref),
+                }),
+                Command::Quad(QuadCmd {
+                    color: 1,
+                    vertices: [
+                        Vec3::new(0.0, 1.0, 0.0),
+                        Vec3::new(0.0, 1.0, 1.0),
+                        Vec3::new(1.0, 1.0, 1.0),
+                        Vec3::new(1.0, 1.0, 0.0),
+                    ],
+                }),
+            ],
+        };
+        let source_file_ref = source_map.insert(s);
+        let source_file = source_file_ref.get(&source_map);
+        for c in source_file.iter(&source_map) {
+            println!("cmd: {:?}", c);
+        }
+
+        let cmds: Vec<_> = source_file.iter(&source_map).map(|(_, cmd)| cmd).collect();
+        assert_eq!(3, cmds.len());
+        assert!(matches!(&cmds[0], Command::Triangle(_)));
+        assert!(matches!(&cmds[1], Command::Triangle(_)));
+        assert!(matches!(&cmds[2], Command::Quad(_)));
+        if let Command::Triangle(tri_cmd) = &cmds[0] {
+            assert_eq!(16, tri_cmd.color);
+        }
+        if let Command::Triangle(tri_cmd) = &cmds[1] {
+            assert_eq!(2, tri_cmd.color);
+        }
+        if let Command::Quad(quad_cmd) = &cmds[2] {
+            assert_eq!(1, quad_cmd.color);
+        }
+
+        let cmds: Vec<_> = source_file.local_iter(&source_map).collect();
+        assert_eq!(4, cmds.len());
+        assert!(matches!(&cmds[0], Command::Triangle(_)));
+        assert!(matches!(&cmds[1], Command::Comment(_)));
+        assert!(matches!(&cmds[2], Command::SubFileRef(_)));
+        assert!(matches!(&cmds[3], Command::Quad(_)));
+        if let Command::Triangle(tri_cmd) = &cmds[0] {
+            assert_eq!(16, tri_cmd.color);
+        }
+        if let Command::Comment(comment_cmd) = &cmds[1] {
+            assert_eq!("my comment", comment_cmd.text);
+        }
+        if let Command::SubFileRef(sfr_cmd) = &cmds[2] {
+            assert_eq!(24, sfr_cmd.color);
+        }
+        if let Command::Quad(quad_cmd) = &cmds[3] {
+            assert_eq!(1, quad_cmd.color);
+        }
     }
 }
