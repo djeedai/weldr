@@ -21,10 +21,6 @@ jobs:
           - beta
           - 1.44.0
 
-        features:
-          - 'default'
-          - ''
-
     steps:
     - name: Checkout
       uses: actions/checkout@v2
@@ -40,7 +36,7 @@ jobs:
       uses: actions-rs/cargo@v1
       with:
         command: build
-        args: --manifest-path lib/Cargo.toml --verbose --no-default-features --features "${{ matrix.features }}"
+        args: --manifest-path lib/Cargo.toml --verbose
 
     - name: Build bin/weldr
       uses: actions-rs/cargo@v1
@@ -52,7 +48,7 @@ jobs:
       uses: actions-rs/cargo@v1
       with:
         command: test
-        args: --manifest-path lib/Cargo.toml --verbose --no-default-features --features "${{ matrix.features }}"
+        args: --manifest-path lib/Cargo.toml --verbose
 
   coverage:
     name: Coverage
@@ -75,8 +71,7 @@ jobs:
 
     - name: Generate code coverage
       run: |
-        cd lib
-        RUST_BACKTRACE=1 cargo tarpaulin --verbose --timeout 120 --out Lcov --config ../tarpaulin.toml
+        RUST_BACKTRACE=1 cargo tarpaulin --verbose --timeout 120 --out Lcov --workspace
         ls -la
 
     - name: Upload code coverage
@@ -104,7 +99,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: doc
-          args: --manifest-path lib/Cargo.toml --verbose --features "default"
+          args: --manifest-path lib/Cargo.toml --verbose
 
   fmt:
     name: Check formatting
