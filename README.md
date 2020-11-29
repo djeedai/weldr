@@ -1,7 +1,6 @@
 # 👨‍🏭 weldr, the link between your favorite building blocks and Rust 🧱
 
 [![LICENSE](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Crates.io Version](https://img.shields.io/crates/v/weldr.svg)](https://crates.io/crates/weldr)
 [![CI](https://github.com/djeedai/weldr/workflows/CI/badge.svg?branch=main)](https://github.com/djeedai/weldr/actions?query=workflow%3ACI)
 [![Coverage Status](https://coveralls.io/repos/github/djeedai/weldr/badge.svg?branch=main)](https://coveralls.io/github/djeedai/weldr?branch=main)
 [![Minimum rustc version](https://img.shields.io/badge/rustc-1.44.0+-lightgray.svg)](#rust-version-requirements)
@@ -10,9 +9,10 @@ weldr is a Rust library and command-line tool to manipulate [LDraw](https://www.
 
 This repository is a Cargo workspace composed of the following packages:
 
-➡ [`lib/` : the weldr library (📦 `weldr` crate)](./lib)
-
-➡ [`bin/weldr/` : the ⚙ `weldr` command-line tool (📦 `weldr-bin` crate)](./bin/weldr)
+| Crate | Version | Description | Path |
+|---|---|---|---|
+| [📦 `weldr`](https://crates.io/crates/weldr) | [![Crates.io Version](https://img.shields.io/crates/v/weldr.svg)](https://crates.io/crates/weldr) | The weldr Rust library | [`lib/`](./lib) |
+| [📦 `weldr-bin`](https://crates.io/crates/weldr-bin) | [![Crates.io Version](https://img.shields.io/crates/v/weldr-bin.svg)](https://crates.io/crates/weldr) | The ⚙ `weldr` command-line tool | [`bin/weldr/`](./bin/weldr) |
 
 ## Library
 
