@@ -1,8 +1,0 @@
-[default_coverage]
-features = "default"
-
-[builtin_math_coverage]
-features = ""
-
-[report]
-out = ["Lcov"]

@@ -21,10 +21,6 @@ jobs:
           - beta
           - 1.44.0
 
-        features:
-          - 'default'
-          - ''
-
     steps:
     - name: Checkout
       uses: actions/checkout@v2
@@ -36,17 +32,23 @@ jobs:
         profile: minimal
         override: true
 
-    - name: Build
+    - name: Build lib
       uses: actions-rs/cargo@v1
       with:
         command: build
-        args: --verbose --no-default-features --features "${{ matrix.features }}"
+        args: --manifest-path lib/Cargo.toml --verbose
 
-    - name: Run tests
+    - name: Build bin/weldr
+      uses: actions-rs/cargo@v1
+      with:
+        command: build
+        args: --manifest-path bin/weldr/Cargo.toml --verbose
+
+    - name: Run lib tests
       uses: actions-rs/cargo@v1
       with:
         command: test
-        args: --verbose --no-default-features --features "${{ matrix.features }}"
+        args: --manifest-path lib/Cargo.toml --verbose
 
   coverage:
     name: Coverage
@@ -69,13 +71,13 @@ jobs:
 
     - name: Generate code coverage
       run: |
-        RUST_BACKTRACE=1 cargo tarpaulin --verbose --workspace --timeout 120 --out Lcov --no-default-features --config tarpaulin.toml
+        RUST_BACKTRACE=1 cargo tarpaulin --verbose --timeout 120 --out Lcov --workspace
         ls -la
 
     - name: Upload code coverage
       uses: coverallsapp/github-action@master
       with:
-        path-to-lcov: './lcov.info'
+        path-to-lcov: 'lcov.info'
         github-token: ${{ secrets.GITHUB_TOKEN }}
 
   doc:
@@ -93,11 +95,11 @@ jobs:
           profile: minimal
           override: true
 
-      - name: Build
+      - name: Doc lib
         uses: actions-rs/cargo@v1
         with:
           command: doc
-          args: --verbose --features "default"
+          args: --manifest-path lib/Cargo.toml --verbose
 
   fmt:
     name: Check formatting

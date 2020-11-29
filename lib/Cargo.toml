@@ -1,0 +1,29 @@
+[package]
+name = "weldr"
+version = "0.2.0"
+authors = ["Jerome Humbert"]
+description = "A Rust library to manage LDraw files (.ldr)"
+license = "MIT"
+repository = "https://github.com/djeedai/weldr"
+readme = "README.md"
+documentation = "https://docs.rs/weldr"
+keywords = ["parsing", "ldraw", "lego", "cad"]
+categories = ["parser-implementations"]
+edition = "2018"
+include = [
+  "CHANGELOG.md",
+  "LICENSE",
+  "README.md",
+  "../.gitignore",
+  "Cargo.toml",
+  "src/*.rs",
+  "tests/*.rs"
+]
+
+[lib]
+name = "weldr"
+path = "src/lib.rs"
+
+[dependencies]
+nom = "5.0.0"
+cgmath = "0.17.0"

@@ -53,10 +53,6 @@
 //! - UTF-8 encoded input
 //! - Both DOS/Windows `<CR><LF>` and Unix `<LF>` line termination accepted
 //!
-//! Drawing commands generally involve some vertex type. By default the `cgmath` feature defines the `Vec3` type
-//! as an alias for the `cgmath::Vector3<f32>` type. This can be disabled by removing the default features, in
-//! which case the `Vec3` falls back to a minimal built-in implementation.
-//!
 //! ## Copyrights
 //!
 //! The current code repository is licensed under the MIT license.
@@ -72,7 +68,6 @@
 #[macro_use]
 extern crate nom;
 
-#[cfg(feature = "cgmath")]
 extern crate cgmath;
 
 use nom::{
@@ -96,17 +91,6 @@ use std::{
     str::{self, from_utf8, FromStr},
 };
 
-#[cfg(not(feature = "cgmath"))]
-mod math;
-
-#[cfg(not(feature = "cgmath"))]
-pub use math::Vec3;
-
-/// Generic 3-component vector for drawing commands.
-///
-/// With the `cgmath` feature (default), this is an alias to `cgmath::Vector3<f32>`.
-/// Without it, the `Vec3` type is defined as a built-in struct with basic operations overloaded.
-#[cfg(feature = "cgmath")]
 pub type Vec3 = cgmath::Vector3<f32>;
 
 pub mod error;
