@@ -115,22 +115,42 @@ mod tests {
         assert!(std::error::Error::source(&error).is_none());
     }
 
+    #[derive(Debug, serde::Deserialize)]
+    struct Dummy {}
+
     #[test]
     fn test_from() {
         let resolve_error = ResolveError::new_raw("file");
         let error: Error = resolve_error.into();
         println!("err: {}", error);
-        match &error {
-            Error::Resolve(resolve_error) => assert_eq!(resolve_error.filename, "file"),
-            _ => panic!("Unexpected error type."),
+        assert!(matches!(&error, Error::Resolve(_)));
+        if let Error::Resolve(resolve_error) = &error {
+            assert_eq!(resolve_error.filename, "file");
         }
 
         let parse_error = ParseError::new("file", error);
         let error: Error = parse_error.into();
         println!("err: {}", error);
-        match &error {
-            Error::Parse(parse_error) => assert_eq!(parse_error.filename, "file"),
-            _ => panic!("Unexpected error type."),
+        assert!(matches!(&error, Error::Parse(_)));
+        if let Error::Parse(parse_error) = &error {
+            assert_eq!(parse_error.filename, "file");
+        }
+
+        let json_error = serde_json::from_str::<Dummy>(&"{[}"[..]).unwrap_err();
+        let error: Error = json_error.into();
+        println!("err: {}", error);
+        assert!(matches!(&error, Error::JsonWrite(_)));
+        if let Error::JsonWrite(json_error) = &error {
+            assert!(json_error.is_syntax());
+        }
+
+        let io_err = std::fs::File::open("_()__doesn't exist__()_").unwrap_err();
+        let gltf_error = Error::GltfWrite(io_err);
+        let error: Error = gltf_error.into();
+        println!("err: {}", error);
+        assert!(matches!(&error, Error::GltfWrite(_)));
+        if let Error::GltfWrite(gltf_error) = &error {
+            assert_eq!(std::io::ErrorKind::NotFound, gltf_error.kind());
         }
     }
 }
