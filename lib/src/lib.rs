@@ -1413,7 +1413,7 @@ mod tests {
         );
         assert_eq!(
             material_grain_size(b"SIZE"),
-            Err(Err::Incomplete(Needed::Size(1)))
+            Err(Err::Error((&b"SIZE"[..], ErrorKind::Alt)))
         );
         assert_eq!(
             material_grain_size(b"SIZE 1"),
@@ -1425,11 +1425,11 @@ mod tests {
         );
         assert_eq!(
             material_grain_size(b"MINSIZE"),
-            Err(Err::Incomplete(Needed::Size(1)))
+            Err(Err::Error((&b"MINSIZE"[..], ErrorKind::Alt)))
         );
         assert_eq!(
             material_grain_size(b"MINSIZE 0.02"),
-            Err(Err::Incomplete(Needed::Size(1)))
+            Err(Err::Error((&b"MINSIZE 0.02"[..], ErrorKind::Alt)))
         );
         assert_eq!(
             material_grain_size(b"MINSIZE 0.02 MAXSIZE 0.04"),
@@ -1442,7 +1442,7 @@ mod tests {
         assert_eq!(glitter_material(b""), Err(Err::Incomplete(Needed::Size(7))));
         assert_eq!(
             glitter_material(b"GLITTER"),
-            Err(Err::Incomplete(Needed::Size(1)))
+            Err(Err::Error((&b""[..], ErrorKind::Space)))
         );
         assert_eq!(
             glitter_material(b"GLITTER VALUE #123456 FRACTION 1.0 VFRACTION 0.3 SIZE 1"),
@@ -1511,7 +1511,7 @@ mod tests {
         assert_eq!(speckle_material(b""), Err(Err::Incomplete(Needed::Size(7))));
         assert_eq!(
             speckle_material(b"SPECKLE"),
-            Err(Err::Incomplete(Needed::Size(1)))
+            Err(Err::Error((&b""[..], ErrorKind::Space)))
         );
         assert_eq!(
             speckle_material(b"SPECKLE VALUE #123456 FRACTION 1.0 SIZE 1"),
@@ -1628,7 +1628,7 @@ mod tests {
         assert_eq!(meta_colour(b""), Err(Err::Incomplete(Needed::Size(7))));
         assert_eq!(
             meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456"),
-            Err(Err::Incomplete(Needed::Size(1)))
+            Err(Err::Error((&b""[..], ErrorKind::Space)))
         );
         assert_eq!(
             meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef"),
