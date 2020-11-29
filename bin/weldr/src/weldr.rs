@@ -513,11 +513,11 @@ mod tests {
             .is_some());
     }
 
-    #[test]
-    fn test_convert() -> Result<(), Error> {
-        let mut app = App {
-            cli: CliArgs::clap(),
-        };
-        convert(&mut app, Path::new("6143.dat").to_path_buf())
-    }
+    // #[test]
+    // fn test_convert() -> Result<(), Error> {
+    //     let mut app = App {
+    //         cli: CliArgs::clap(),
+    //     };
+    //     convert(&mut app, Path::new("6143.dat").to_path_buf())
+    // }
 }
