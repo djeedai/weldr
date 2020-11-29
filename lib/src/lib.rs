@@ -415,8 +415,6 @@ named!(
     alt!(complete!(category) | complete!(keywords) | complete!(meta_colour) | comment)
 );
 
-named!(sp<char>, char!(' '));
-
 named!(
     read_vec3<Vec3>,
     do_parse!(x: float >> sp >> y: float >> sp >> z: float >> (Vec3 { x: x, y: y, z: z }))
@@ -539,6 +537,12 @@ named!(
 // Valid even on empty input.
 fn space0(input: &[u8]) -> IResult<&[u8], &[u8]> {
     input.split_at_position_complete(|item| !is_space(item))
+}
+
+// One or more "spaces", as defined in LDraw standard.
+// Valid even on empty input.
+fn sp(input: &[u8]) -> IResult<&[u8], &[u8]> {
+    input.split_at_position1_complete(|item| !is_space(item), ErrorKind::Space)
 }
 
 // Zero or more "spaces", as defined in LDraw standard.
