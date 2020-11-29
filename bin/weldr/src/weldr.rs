@@ -355,25 +355,6 @@ unsafe fn as_u8_slice<T: Sized>(p: &[T]) -> &[u8] {
     )
 }
 
-#[test]
-fn ttt() {
-    assert_eq!(12, std::mem::size_of::<Vec3>());
-    let v = vec![
-        Vec3 {
-            x: 1.0,
-            y: 2.0,
-            z: 4.0,
-        },
-        Vec3 {
-            x: 1.0,
-            y: 2.0,
-            z: 4.0,
-        },
-    ];
-    let b: &[u8] = unsafe { as_u8_slice(&v[..]) };
-    assert_eq!(24, b.len());
-}
-
 fn convert(app: &mut App, input: PathBuf) -> Result<(), Error> {
     let input = input.to_str();
     if input.is_none() {
@@ -481,6 +462,25 @@ fn main() -> Result<(), Error> {
 mod tests {
 
     use super::*;
+
+    #[test]
+    fn test_as_u8_slice() {
+        assert_eq!(12, std::mem::size_of::<Vec3>());
+        let v = vec![
+            Vec3 {
+                x: 1.0,
+                y: 2.0,
+                z: 4.0,
+            },
+            Vec3 {
+                x: 1.0,
+                y: 2.0,
+                z: 4.0,
+            },
+        ];
+        let b: &[u8] = unsafe { as_u8_slice(&v[..]) };
+        assert_eq!(24, b.len());
+    }
 
     #[test]
     fn test_disk_resolver_new() {
