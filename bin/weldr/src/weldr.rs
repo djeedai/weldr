@@ -18,7 +18,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use structopt::StructOpt;
-use weldr::{Command, FileRefResolver, ResolveError, Vec3};
+use weldr::{Command, DrawContext, FileRefResolver, Mat4, ResolveError, Vec3, Vec4};
 
 #[derive(StructOpt)]
 #[structopt(name = "weldr", author = "Jerome Humbert <djeedai@gmail.com>")]
@@ -204,24 +204,27 @@ impl GeometryCache {
         }
     }
 
-    fn add_line(&mut self, vertices: &[Vec3; 2]) {
-        self.insert(&vertices[0]);
-        self.insert(&vertices[1]);
+    fn add_line(&mut self, draw_ctx: &DrawContext, vertices: &[Vec3; 2]) {
+        // TODO : add line primitive (not only triangle)
+        //self.insert(&vertices[0]);
+        //self.insert(&vertices[1]);
     }
 
-    fn add_triangle(&mut self, vertices: &[Vec3; 3]) {
-        self.insert(&vertices[0]);
-        self.insert(&vertices[1]);
-        self.insert(&vertices[2]);
+    fn add_triangle(&mut self, draw_ctx: &DrawContext, vertices: &[Vec3; 3]) {
+        let v0 = Vec4::new(vertices[0].x, vertices[0].y, vertices[0].z, 1.0);
+        let v0 = (draw_ctx.transform * v0).truncate();
+        self.insert(&v0);
+        let v1 = Vec4::new(vertices[1].x, vertices[1].y, vertices[1].z, 1.0);
+        let v1 = (draw_ctx.transform * v1).truncate();
+        self.insert(&v1);
+        let v2 = Vec4::new(vertices[2].x, vertices[2].y, vertices[2].z, 1.0);
+        let v2 = (draw_ctx.transform * v2).truncate();
+        self.insert(&v2);
     }
 
-    fn add_quad(&mut self, vertices: &[Vec3; 4]) {
-        self.insert(&vertices[0]);
-        self.insert(&vertices[1]);
-        self.insert(&vertices[2]);
-        self.insert(&vertices[0]);
-        self.insert(&vertices[2]);
-        self.insert(&vertices[3]);
+    fn add_quad(&mut self, draw_ctx: &DrawContext, vertices: &[Vec3; 4]) {
+        self.add_triangle(draw_ctx, &[vertices[0], vertices[1], vertices[2]]);
+        self.add_triangle(draw_ctx, &[vertices[0], vertices[2], vertices[3]]);
     }
 
     fn write(&self, base_path: &Path) -> Result<(), Error> {
@@ -374,13 +377,13 @@ fn convert(app: &mut App, input: PathBuf) -> Result<(), Error> {
         vertex_map: HashMap::new(),
     };
     let source_file = source_file_ref.get(&source_map);
-    for cmd in source_file.iter(&source_map) {
+    for (draw_ctx, cmd) in source_file.iter(&source_map) {
         eprintln!("  cmd: {:?}", cmd);
         match cmd {
-            Command::Line(l) => geometry_cache.add_line(&l.vertices),
-            Command::Triangle(t) => geometry_cache.add_triangle(&t.vertices),
-            Command::Quad(q) => geometry_cache.add_quad(&q.vertices),
-            Command::OptLine(l) => geometry_cache.add_line(&l.vertices),
+            Command::Line(l) => geometry_cache.add_line(&draw_ctx, &l.vertices),
+            Command::Triangle(t) => geometry_cache.add_triangle(&draw_ctx, &t.vertices),
+            Command::Quad(q) => geometry_cache.add_quad(&draw_ctx, &q.vertices),
+            Command::OptLine(l) => geometry_cache.add_line(&draw_ctx, &l.vertices),
             _ => {}
         }
     }

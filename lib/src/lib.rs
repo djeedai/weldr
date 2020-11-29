@@ -93,6 +93,12 @@ pub type Vec3 = cgmath::Vector3<f32>;
 pub type Vec4 = cgmath::Vector4<f32>;
 pub type Mat4 = cgmath::Matrix4<f32>;
 
+#[cfg(feature = "cgmath")]
+pub type Vec4 = cgmath::Vector4<f32>;
+
+#[cfg(feature = "cgmath")]
+pub type Mat4 = cgmath::Matrix4<f32>;
+
 pub mod error;
 
 pub use error::{Error, ParseError, ResolveError};
@@ -632,6 +638,12 @@ struct ResolveQueue {
     pending_count: HashMap<String, u32>,
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct DrawContext {
+    pub transform: Mat4,
+    pub color: u32,
+}
+
 /// Iterator over all drawing commands of a [`SourceFile`] and all its referenced sub-files.
 ///
 /// Sub-file reference commands are not yielded, but instead the drawing commands of those
@@ -667,8 +679,12 @@ impl SourceFile {
     /// Return an iterator over all drawing commands, recursively stepping into sub-file references
     /// without returning the corresponding [`SubFileRefCmd`] command nor any comment command.
     pub fn iter<'a>(&'a self, source_map: &'a SourceMap) -> CommandIterator<'a> {
+        let draw_ctx = DrawContext {
+            transform: Mat4::from_scale(1.0),
+            color: 16,
+        };
         CommandIterator {
-            stack: vec![(&self, 0)],
+            stack: vec![(&self, 0, draw_ctx)],
             source_map,
         }
     }
@@ -686,26 +702,37 @@ impl SourceFile {
 }
 
 impl<'a> Iterator for CommandIterator<'a> {
-    type Item = &'a Command;
+    type Item = (DrawContext, &'a Command);
 
-    fn next(&mut self) -> Option<&'a Command> {
+    fn next(&mut self) -> Option<(DrawContext, &'a Command)> {
         while let Some(entry) = self.stack.last_mut() {
             let cmds = &entry.0.cmds;
             let index = &mut entry.1;
+            let draw_ctx = &entry.2;
             if *index < cmds.len() {
                 let cmd = &cmds[*index];
                 *index += 1;
                 if let Command::SubFileRef(sfr_cmd) = &cmd {
                     if let SubFileRef::ResolvedRef(resolved_ref) = &sfr_cmd.file {
                         let source_file_2 = resolved_ref.get(self.source_map);
-                        self.stack.push((source_file_2, 0));
+                        let local_transform = Mat4::from_cols(
+                            Vec4::new(sfr_cmd.row0.x, sfr_cmd.row1.x, sfr_cmd.row2.x, 0.0),
+                            Vec4::new(sfr_cmd.row0.y, sfr_cmd.row1.y, sfr_cmd.row2.y, 0.0),
+                            Vec4::new(sfr_cmd.row0.z, sfr_cmd.row1.z, sfr_cmd.row2.z, 0.0),
+                            Vec4::new(sfr_cmd.pos.x, sfr_cmd.pos.y, sfr_cmd.pos.z, 1.0),
+                        );
+                        let draw_ctx = DrawContext {
+                            transform: draw_ctx.transform * local_transform,
+                            color: 16,
+                        };
+                        self.stack.push((source_file_2, 0, draw_ctx));
                         continue;
                     }
                 } else if let Command::Comment(_) = &cmd {
                     // Skip comments
                     continue;
                 }
-                return Some(cmd);
+                return Some((*draw_ctx, cmd));
             }
             self.stack.pop();
         }
@@ -783,7 +810,7 @@ fn test_iter() {
     for c in source_file.iter(&source_map) {
         println!("cmd: {:?}", c);
     }
-    let cmds: Vec<_> = source_file.iter(&source_map).collect();
+    let cmds: Vec<_> = source_file.iter(&source_map).map(|(_, cmd)| cmd).collect();
     assert_eq!(3, cmds.len());
     match &cmds[0] {
         Command::Triangle(tri_cmd) => assert_eq!(16, tri_cmd.color),
