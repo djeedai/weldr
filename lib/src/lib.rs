@@ -607,9 +607,13 @@ named!(
 /// }
 /// ```
 pub fn parse_raw(ldr_content: &[u8]) -> Result<Vec<Command>, Error> {
+    parse_raw_with_filename("", ldr_content)
+}
+
+fn parse_raw_with_filename(filename: &str, ldr_content: &[u8]) -> Result<Vec<Command>, Error> {
     // "An LDraw file consists of one command per line."
     many0(read_line)(ldr_content).map_or_else(
-        |e| Err(Error::Parse(ParseError::new_from_nom("", &e))),
+        |e| Err(Error::Parse(ParseError::new_from_nom(filename, &e))),
         |(_, cmds)| Ok(cmds),
     )
 }
@@ -847,7 +851,7 @@ fn load_and_parse_single_file(
         raw_content,
         cmds: Vec::new(),
     };
-    let cmds = parse_raw(&source_file.raw_content[..])?;
+    let cmds = parse_raw_with_filename(&source_file.filename[..], &source_file.raw_content[..])?;
     source_file.cmds = cmds;
     Ok(source_file)
 }
