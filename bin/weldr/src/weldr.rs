@@ -33,7 +33,6 @@ enum Command {
 #[structopt(name = "convert", about = "Convert LDraw file to another format")]
 struct ConvertCommand {
     /// Target format, one of "gltf"
-    //#[structopt(parse(from_str = format_from_str))]
     #[structopt(subcommand)]
     format: ConvertFormat,
 
@@ -53,23 +52,18 @@ enum ConvertFormat {
     Gltf,
 }
 
-fn format_from_str(s: &str) -> ConvertFormat {
-    match s {
-        "gltf" => ConvertFormat::Gltf,
-        _ => panic!(),
-    }
-}
-
 struct App<'a, 'b> {
     cli: clap::App<'a, 'b>,
 }
 
 impl App<'_, '_> {
+    #[cfg(not(tarpaulin_include))]
     fn print_help_and_exit(&mut self) {
         let _ = self.cli.print_help();
         std::process::exit(1);
     }
 
+    #[cfg(not(tarpaulin_include))]
     fn print_error_and_exit(&self, msg: &str) {
         eprintln!("{}: {}", Red.paint("error"), msg);
         std::process::exit(1);
@@ -415,9 +409,7 @@ fn convert(app: &mut App, input: PathBuf) -> Result<(), Error> {
     }
 
     let json_path = resolver.resolve_path(input)?;
-    geometry_cache.write(&json_path);
-
-    Ok(())
+    geometry_cache.write(&json_path)
 }
 
 fn main() -> Result<(), Error> {
@@ -481,4 +473,18 @@ fn main() -> Result<(), Error> {
     let cmds = weldr::parse_raw(&b"1 16 0 0 0 1 0 0 0 1 0 sub.ldr"[..])?;
     println!("cmds #{}", cmds.len());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn test_app_exit() {
+        let app = App {
+            cli: CliArgs::clap(),
+        };
+        app.exit(0);
+    }
 }

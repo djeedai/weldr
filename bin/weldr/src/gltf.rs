@@ -256,6 +256,48 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_is_zero() {
+        assert!(is_zero(&0));
+        assert!(!is_zero(&1));
+        assert!(!is_zero(&0xFFFFFFFF));
+    }
+
+    #[test]
+    fn test_is_false() {
+        assert!(is_false(&false));
+        assert!(!is_false(&true));
+    }
+
+    #[test]
+    fn test_asset_utils() {
+        assert_eq!(
+            Asset::new("2.0").min_version("1.0").min_version,
+            Some("1.0".to_string())
+        );
+        assert_eq!(
+            Asset::new("2.0").generator("weldr").generator,
+            Some("weldr".to_string())
+        );
+        assert_eq!(
+            Asset::new("2.0").copyright("(c) weldr").copyright,
+            Some("(c) weldr".to_string())
+        );
+    }
+
+    #[test]
+    fn test_asset_add_scene() {
+        let asset = Asset::new("2.0");
+        let scene = Scene {
+            name: None,
+            nodes: vec![],
+        };
+        let mut gltf = Gltf::new(asset);
+        gltf.add_scene(scene);
+        assert_eq!(1, gltf.scenes.len());
+        assert!(gltf.scene.is_some());
+    }
+
+    #[test]
     fn root() {
         let asset = Asset::new("2.0");
         let gltf = Gltf::new(asset);
