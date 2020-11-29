@@ -77,7 +77,7 @@ jobs:
     - name: Upload code coverage
       uses: coverallsapp/github-action@master
       with:
-        path-to-lcov: 'lib/lcov.info'
+        path-to-lcov: 'lcov.info'
         github-token: ${{ secrets.GITHUB_TOKEN }}
 
   doc:
