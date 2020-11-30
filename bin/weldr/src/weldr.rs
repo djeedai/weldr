@@ -189,6 +189,14 @@ struct GeometryCache {
 }
 
 impl GeometryCache {
+    fn new() -> GeometryCache {
+        GeometryCache {
+            vertices: vec![],
+            indices: vec![],
+            vertex_map: HashMap::new(),
+        }
+    }
+
     /// Insert a new vertex and return its index.
     fn insert(&mut self, vec: &Vec3) -> u32 {
         if let Some(index) = self.vertex_map.get(&vec.into()) {
@@ -371,11 +379,7 @@ fn convert(app: &mut App, input: PathBuf) -> Result<(), Error> {
     let source_file_ref = weldr::parse(input, &resolver, &mut source_map)?;
 
     eprintln!("Converting file '{}' to {} format", input, "gltf");
-    let mut geometry_cache = GeometryCache {
-        vertices: vec![],
-        indices: vec![],
-        vertex_map: HashMap::new(),
-    };
+    let mut geometry_cache = GeometryCache::new();
     let source_file = source_file_ref.get(&source_map);
     for (draw_ctx, cmd) in source_file.iter(&source_map) {
         eprintln!("  cmd: {:?}", cmd);
@@ -495,6 +499,52 @@ mod tests {
             .is_some());
     }
 
+    #[test]
+    fn test_disk_resolver_resolve_path() {
+        // Ensure test dir exists and is empty
+        let mut root_path = std::env::temp_dir();
+        root_path.push("weldr/tests/disk_resolver");
+        if root_path.is_dir() {
+            std::fs::remove_dir(&root_path).unwrap_or_default();
+        }
+        std::fs::create_dir_all(&root_path).unwrap_or_default();
+        let base_path = root_path.join("parts");
+        std::fs::create_dir(&base_path).unwrap_or_default();
+
+        // Create disk-based resolver
+        let resolver = DiskResolver::new_from_root(root_path.to_str().unwrap());
+
+        // Create a dummy file and resolve its reference filename to the on-disk filename
+        let dummy_filename = base_path.join("dummy.ldr");
+        {
+            let mut f = std::fs::File::create(&dummy_filename).unwrap();
+            f.write(b"dummy content").unwrap();
+        }
+        assert_eq!(dummy_filename, resolver.resolve_path("dummy.ldr").unwrap());
+
+        // Resolve its content
+        assert!(resolver.resolve("dummy.ldr").is_ok());
+
+        // Delete test file
+        std::fs::remove_file(&dummy_filename).unwrap_or_default();
+
+        // Fail to resolve non-existing file
+        let dummy_filename = base_path.join("non_existing.ldr");
+        if dummy_filename.is_file() {
+            std::fs::remove_file(&dummy_filename).unwrap_or_default();
+        }
+        assert!(matches!(
+            resolver.resolve("non_existing.ldr"),
+            Err(weldr::ResolveError {
+                filename: _,
+                resolve_error: _,
+            })
+        ));
+
+        // Delete the test dir on success
+        std::fs::remove_dir(&base_path).unwrap_or_default();
+    }
+
     // #[test]
     // fn test_convert() -> Result<(), Error> {
     //     let mut app = App {
@@ -502,4 +552,166 @@ mod tests {
     //     };
     //     convert(&mut app, Path::new("6143.dat").to_path_buf())
     // }
+
+    #[test]
+    fn test_from_vecref() {
+        let r = &VecRef {
+            x: NotNan::new(0.0).unwrap(),
+            y: NotNan::new(1.0).unwrap(),
+            z: NotNan::new(2.0).unwrap(),
+        };
+        let v: Vec3 = r.into();
+        assert_eq!(0.0, v.x);
+        assert_eq!(1.0, v.y);
+        assert_eq!(2.0, v.z);
+    }
+
+    #[test]
+    fn test_from_vec3() {
+        let v = Vec3 {
+            x: 0.0,
+            y: 1.0,
+            z: 2.0,
+        };
+        let r: VecRef = v.into();
+        assert_eq!(0.0, r.x.into_inner() as f32);
+        assert_eq!(1.0, r.y.into_inner() as f32);
+        assert_eq!(2.0, r.z.into_inner() as f32);
+    }
+
+    #[test]
+    fn test_from_vec3_ref() {
+        let v = &Vec3 {
+            x: 0.0,
+            y: 1.0,
+            z: 2.0,
+        };
+        let r: VecRef = v.into();
+        assert_eq!(0.0, r.x.into_inner() as f32);
+        assert_eq!(1.0, r.y.into_inner() as f32);
+        assert_eq!(2.0, r.z.into_inner() as f32);
+    }
+
+    #[test]
+    fn test_geocache_insert() {
+        let mut geo = GeometryCache::new();
+        // First vertex always inserts
+        let index = geo.insert(&Vec3::new(0.0, 1.0, 2.0));
+        assert_eq!(0, index);
+        assert_eq!(1, geo.vertex_map.len());
+        assert_eq!(1, geo.vertices.len());
+        assert_eq!(1, geo.indices.len());
+        // Duplicate vertex inserts index only
+        let index = geo.insert(&Vec3::new(0.0, 1.0, 2.0));
+        assert_eq!(0, index);
+        assert_eq!(1, geo.vertex_map.len());
+        assert_eq!(1, geo.vertices.len());
+        assert_eq!(2, geo.indices.len());
+        // New unique vertex inserts both index and vertex
+        let index = geo.insert(&Vec3::new(-5.0, 1.0, 2.0));
+        assert_eq!(1, index);
+        assert_eq!(2, geo.vertices.len());
+        assert_eq!(2, geo.vertex_map.len());
+        assert_eq!(3, geo.indices.len());
+    }
+
+    #[test]
+    fn test_geocache_add_line() {
+        let mut geo = GeometryCache::new();
+        let draw_ctx = DrawContext {
+            transform: Mat4::from_scale(1.0),
+            color: 16,
+        };
+        geo.add_line(
+            &draw_ctx,
+            &[Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0)],
+        );
+        //assert_eq!(2, geo.vertices.len());
+        //assert_eq!(2, geo.vertex_map.len());
+        //assert_eq!(2, geo.indices.len());
+    }
+
+    #[test]
+    fn test_geocache_add_triangle() {
+        let mut geo = GeometryCache::new();
+        let draw_ctx = DrawContext {
+            transform: Mat4::from_scale(1.0),
+            color: 16,
+        };
+        geo.add_triangle(
+            &draw_ctx,
+            &[
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            ],
+        );
+        assert_eq!(3, geo.vertices.len());
+        assert_eq!(3, geo.vertex_map.len());
+        assert_eq!(3, geo.indices.len());
+    }
+
+    #[test]
+    fn test_geocache_add_quad() {
+        let mut geo = GeometryCache::new();
+        let draw_ctx = DrawContext {
+            transform: Mat4::from_scale(1.0),
+            color: 16,
+        };
+        geo.add_quad(
+            &draw_ctx,
+            &[
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(1.0, 1.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            ],
+        );
+        // Quad is made of 2 triangles (6 indices)
+        assert_eq!(4, geo.vertices.len());
+        assert_eq!(4, geo.vertex_map.len());
+        assert_eq!(6, geo.indices.len());
+    }
+
+    struct TestWriter {}
+
+    impl std::io::Write for TestWriter {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Ok(1)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_geocache_write_all() {
+        let mut geo = GeometryCache::new();
+        let draw_ctx = DrawContext {
+            transform: Mat4::from_scale(1.0),
+            color: 16,
+        };
+        geo.add_quad(
+            &draw_ctx,
+            &[
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(1.0, 1.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            ],
+        );
+        let mut writer = TestWriter {};
+        assert!(geo.write_vertex_buffer(&mut writer).is_ok());
+        assert!(geo.write_index_buffer(&mut writer).is_ok());
+        let mut geometry_buffers = vec![];
+        geometry_buffers.push(GeometryBuffer {
+            file: PathBuf::new(),
+            size: 12,
+            stride: 12,
+            component_type: gltf::ComponentType::Float,
+            attribute_type: gltf::AttributeType::Vec3,
+        });
+        assert!(geo.write_gltf(&mut writer, &geometry_buffers).is_ok());
+    }
 }

@@ -348,4 +348,14 @@ mod tests {
             "{\"version\":\"2.0\",\"copyright\":\"(c) weldr\"}".to_string()
         );
     }
+
+    #[test]
+    fn buffer() {
+        let buffer = Buffer::new(32);
+        assert_eq!(32, buffer.byte_length);
+        assert!(buffer.name.is_none());
+        assert!(buffer.uri.is_none());
+        let buffer = buffer.uri("test_uri");
+        assert_eq!("test_uri", buffer.uri.unwrap());
+    }
 }
