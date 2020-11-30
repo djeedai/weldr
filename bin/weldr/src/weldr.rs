@@ -14,7 +14,7 @@ use std::{
     collections::HashMap,
     fs::File,
     io::Read,
-    io::{self, BufReader, Write},
+    io::{BufReader, Write},
     path::{Path, PathBuf},
 };
 use structopt::StructOpt;
@@ -124,13 +124,13 @@ impl FileRefResolver for DiskResolver {
             let mut buffer = Vec::new();
             match buf_reader.read_to_end(&mut buffer) {
                 Ok(_) => return Ok(buffer),
-                Err(e) => match e.kind() {
-                    io::ErrorKind::NotFound => continue,
-                    _ => return Err(ResolveError::new(filename, e)),
-                },
+                Err(e) => return Err(ResolveError::new(filename, e)),
             }
         }
-        Err(ResolveError::new_raw(filename))
+        Err(ResolveError::new(
+            filename,
+            std::io::Error::from(std::io::ErrorKind::NotFound),
+        ))
     }
 }
 
