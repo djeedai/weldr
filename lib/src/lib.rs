@@ -476,6 +476,7 @@ named!(
             >> v1: read_vec3
             >> sp
             >> v2: read_vec3
+            >> space0
             >> (Command::Line(LineCmd {
                 color: color,
                 vertices: [v1, v2]
@@ -493,6 +494,7 @@ named!(
             >> v2: read_vec3
             >> sp
             >> v3: read_vec3
+            >> space0
             >> (Command::Triangle(TriangleCmd {
                 color: color,
                 vertices: [v1, v2, v3]
@@ -512,6 +514,7 @@ named!(
             >> v3: read_vec3
             >> sp
             >> v4: read_vec3
+            >> space0
             >> (Command::Quad(QuadCmd {
                 color: color,
                 vertices: [v1, v2, v3, v4]
@@ -531,6 +534,7 @@ named!(
             >> v3: read_vec3
             >> sp
             >> v4: read_vec3
+            >> space0
             >> (Command::OptLine(OptLineCmd {
                 color: color,
                 vertices: [v1, v2],
@@ -1925,6 +1929,19 @@ mod tests {
         });
         assert_eq!(
             read_line(b"3 16 1 1 0 0.9239 1 0.3827 0.9239 0 0.3827"),
+            Ok((&b""[..], res))
+        );
+        let res = Command::Triangle(TriangleCmd {
+            color: 16,
+            vertices: [
+                Vec3::new(1.0, 1.0, 0.0),
+                Vec3::new(0.9239, 1.0, 0.3827),
+                Vec3::new(0.9239, 0.0, 0.3827),
+            ],
+        });
+        assert_eq!(
+            // Note: extra spaces at end
+            read_line(b"3 16 1 1 0 0.9239 1 0.3827 0.9239 0 0.3827  "),
             Ok((&b""[..], res))
         );
     }
