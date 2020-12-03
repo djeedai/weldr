@@ -1,12 +1,11 @@
 [package]
 name = "weldr-bin"
-version = "0.0.1"
+version = "0.1.0"
 authors = ["Jerome Humbert"]
-description = "A tool to manipulate LDraw files (.ldr)"
+description = "A command-line tool to manipulate LDraw files (.ldr)"
 license = "MIT"
 repository = "https://github.com/djeedai/weldr"
 readme = "README.md"
-documentation = "https://docs.rs/weldr-bin"
 keywords = ["convert", "ldraw", "lego", "cad"]
 categories = ["command-line-utilities", "multimedia::encoding"]
 edition = "2018"
@@ -25,7 +24,7 @@ path = "src/weldr.rs"
 doc = false
 
 [dependencies]
-weldr = { version = "0.2", path = "../../lib" }
+weldr = { version = "0.3", path = "../../lib" }
 ansi_term = "0.12"
 clap = "2.33"
 structopt = "0.3"
