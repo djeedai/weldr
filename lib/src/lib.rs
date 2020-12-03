@@ -642,9 +642,21 @@ struct ResolveQueue {
     pending_count: HashMap<String, u32>,
 }
 
+/// Drawing context used when iterating over all drawing commands of a file via [`SourceFile::iter()`].
 #[derive(Debug, Copy, Clone)]
 pub struct DrawContext {
+    /// Current transformation matrix for the drawing command. This is the accumulated transformation
+    /// of all parent files.
+    ///
+    /// When drawing a primitive (line, triangle, quad), the actual position of vertices is obtained
+    /// by transforming the local-space positions of the drawing command by this transformation matrix.
+    ///
+    /// ```rust
+    /// let v0 = draw_ctx.transform * cmd.vertices[0];
+    /// ```
     pub transform: Mat4,
+
+    /// Current color for substitution of color 16.
     pub color: u32,
 }
 
@@ -1190,7 +1202,8 @@ pub struct TriangleCmd {
 pub struct QuadCmd {
     /// Color code of the primitive.
     pub color: u32,
-    /// Vertices of the quad.
+    /// Vertices of the quad. In theory they are guaranteed to be coplanar according to the LDraw
+    /// specification, although no attempt is made to validate this property.
     pub vertices: [Vec3; 4],
 }
 
