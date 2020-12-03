@@ -1,5 +1,26 @@
 # Change Log
 
+## 0.3.0
+
+### Added
+
+- Add error handling via new `Error` enum.
+- Add iterators to `SourceFile` to iterate eihter on all drawing commands recursively (`iter()`) or on local commands only (`local_iter()`).
+- Add `DrawContext` to provide current transformation matrix and current color while iterating into sub-file references.
+
+### Removed
+
+- `cgmath` feature has been removed; the `cgmath` dependency is now mandatory.
+
+### Changed
+
+- Replaced ref-counted `Rc<RefCell<SourceFile>>` with index-based `SourceFileRef`.
+
+### Fixed
+
+- Handle multiple spaces between fields in drawing commands.
+- Handle empty comment commands.
+
 ## 0.2.0
 
 ### Added

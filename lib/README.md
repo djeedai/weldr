@@ -51,7 +51,7 @@ weldr is available on [crates.io](https://crates.io/crates/weldr) and can be inc
 
 ```toml
 [dependencies]
-weldr = "0.2"
+weldr = "0.3"
 ```
 
 Then include it in your code like this:
