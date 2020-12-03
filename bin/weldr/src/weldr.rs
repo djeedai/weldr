@@ -6,9 +6,13 @@
 mod error;
 mod gltf;
 
+#[macro_use]
+extern crate log;
+
 use error::Error;
 
-use ansi_term::Color::{Red, Yellow};
+use ansi_term::Color::{Blue, Purple, Red, Yellow};
+use log::{Level, Metadata, Record};
 use ordered_float::NotNan;
 use std::{
     collections::HashMap,
@@ -19,6 +23,29 @@ use std::{
 };
 use structopt::StructOpt;
 use weldr::{Command, DrawContext, FileRefResolver, Mat4, ResolveError, Vec3, Vec4};
+
+struct SimpleLogger;
+
+impl log::Log for SimpleLogger {
+    fn enabled(&self, metadata: &Metadata) -> bool {
+        metadata.level() <= Level::Info
+    }
+
+    fn log(&self, record: &Record) {
+        if self.enabled(record.metadata()) {
+            let prefix = match record.level() {
+                log::Level::Error => format!("{}: ", Red.paint("error")),
+                log::Level::Warn => format!("{}: ", Yellow.paint("warning")),
+                log::Level::Info => "".to_string(),
+                log::Level::Debug => format!("{}: ", Blue.paint("debug")),
+                log::Level::Trace => format!("{}: ", Purple.paint("trace")),
+            };
+            eprintln!("{}{}", prefix, record.args());
+        }
+    }
+
+    fn flush(&self) {}
+}
 
 #[derive(StructOpt)]
 #[structopt(name = "weldr", author = "Jerome Humbert <djeedai@gmail.com>")]
@@ -96,7 +123,7 @@ impl App<'_, '_> {
 
     #[cfg(not(tarpaulin_include))] // don't test function that exit process
     fn print_error_and_exit(&self, msg: &str) {
-        eprintln!("{}: {}", Red.paint("error"), msg);
+        error!("{}", msg);
         std::process::exit(1);
     }
 
@@ -272,7 +299,7 @@ impl GeometryCache {
         let json_path = base_path.with_extension("gltf");
 
         let bin_file_path = base_path.with_extension("glbuf");
-        eprintln!("Writing binary buffer file to {:?}", bin_file_path);
+        info!("Writing binary buffer file to {:?}", bin_file_path);
         let mut bin_file = File::create(&bin_file_path).map_err(|e| Error::GltfWrite(e))?;
         let (vb_size, line_ib_size, tri_ib_size) = self.write_binary_buffers(&mut bin_file)?;
 
@@ -308,7 +335,7 @@ impl GeometryCache {
             //offset += tri_ib_size;
         }
 
-        eprintln!("Writing JSON file to {:?}", json_path);
+        info!("Writing JSON file to {:?}", json_path);
         let mut json_file = File::create(json_path).unwrap();
         self.write_gltf(
             &mut json_file,
@@ -464,9 +491,8 @@ fn convert(app: &mut App, args: &ConvertCommand) -> Result<(), Error> {
     if let Some(catalog_path) = &args.catalog_path {
         resolver = DiskResolver::new_from_root(catalog_path);
     } else if let Ok(cwd) = std::env::current_dir() {
-        eprintln!(
-            "{}: No catalog path specified; using current working directory: {}",
-            Yellow.paint("warning"),
+        warn!(
+            "No catalog path specified; using current working directory: {}",
             cwd.to_str().unwrap_or("(invalid path)")
         );
         resolver = DiskResolver::new_from_root(cwd);
@@ -482,15 +508,15 @@ fn convert(app: &mut App, args: &ConvertCommand) -> Result<(), Error> {
         }
     }
 
-    eprintln!("Parsing file '{}'", input);
+    info!("Parsing file '{}'", input);
     let mut source_map = weldr::SourceMap::new();
     let source_file_ref = weldr::parse(input, &resolver, &mut source_map)?;
 
-    eprintln!("Converting file '{}' to {} format", input, "gltf");
+    info!("Converting file '{}' to {} format", input, "gltf");
     let mut geometry_cache = GeometryCache::new();
     let source_file = source_file_ref.get(&source_map);
     for (draw_ctx, cmd) in source_file.iter(&source_map) {
-        eprintln!("  cmd: {:?}", cmd);
+        debug!("  cmd: {:?}", cmd);
         match cmd {
             Command::Line(l) => {
                 if args.with_lines {
@@ -508,18 +534,24 @@ fn convert(app: &mut App, args: &ConvertCommand) -> Result<(), Error> {
         }
     }
     // for v in &geometry_cache.vertices {
-    //     eprintln!("vec: {:?}", v);
+    //     trace!("vec: {:?}", v);
     // }
     // for i in &geometry_cache.indices {
-    //     eprintln!("idx: {:?}", i);
+    //     trace!("idx: {:?}", i);
     // }
 
     let json_path = resolver.resolve_path(input)?;
     geometry_cache.write(&json_path)
 }
 
+static LOGGER: SimpleLogger = SimpleLogger;
+
 #[cfg(not(tarpaulin_include))]
 fn main() -> Result<(), Error> {
+    log::set_logger(&LOGGER)
+        .map(|()| log::set_max_level(log::LevelFilter::Info))
+        .unwrap();
+
     let args = CliArgs::from_args();
     let mut app = App {
         cli: CliArgs::clap(),
@@ -536,15 +568,11 @@ fn main() -> Result<(), Error> {
                 );
             }
             Error::Resolve(resolve_err) => {
-                eprintln!(
-                    "{}: cannot resolve filename '{}'.",
-                    Red.paint("error"),
-                    resolve_err.filename
-                );
+                error!("cannot resolve filename '{}'.", resolve_err.filename);
                 if let Some(e) = resolve_err.resolve_error {
-                    eprintln!("       {}", e);
+                    error!("       {}", e);
                     while let Some(e) = e.source() {
-                        eprintln!("       {}", e);
+                        error!("       {}", e);
                     }
                 }
                 app.exit(1);
