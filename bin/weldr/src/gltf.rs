@@ -169,7 +169,7 @@ pub struct Accessor {
     pub normalized: bool, // optional, but defaults to false
 }
 
-#[derive(Serialize_repr, Deserialize_repr, PartialEq, Debug)]
+#[derive(Serialize_repr, Deserialize_repr, PartialEq, Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum PrimitiveMode {
     Points = 0,
@@ -181,12 +181,16 @@ pub enum PrimitiveMode {
     TriangleFan = 6,
 }
 
+pub type AccessorIndex = u32;
+
 #[derive(Serialize, Deserialize)]
 pub struct Primitive {
-    pub attributes: HashMap<String, u32>,
+    /// Map of indices into the `Gltf.accessors` array from the vertex attribute semantic.
+    pub attributes: HashMap<String, AccessorIndex>,
 
+    /// Index into the `Gltf.accessors` array of the accessor for indices.
     #[serde(skip_serializing_if = "is_zero")]
-    pub indices: u32, // optional, but defaults to zero
+    pub indices: AccessorIndex, // optional, but defaults to zero
 
     pub mode: PrimitiveMode,
 }

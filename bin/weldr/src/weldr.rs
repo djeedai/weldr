@@ -44,14 +44,18 @@ struct ConvertCommand {
     input: PathBuf,
 
     /// Output file, stdout if not present
-    #[structopt(parse(from_os_str), long = "output", short = "o")]
+    #[structopt(parse(from_os_str), long = "output", short = "o", value_name = "FILE")]
     output: Option<PathBuf>,
+
+    /// Output line segments in addition of surfaces (triangles/quads).
+    #[structopt(long = "lines", short = "l", takes_value = false)]
+    with_lines: bool,
 }
 
 #[derive(StructOpt)]
 #[structopt(display_order = 1)]
 enum ConvertFormat {
-    #[structopt(about = "gltf")]
+    #[structopt(about = "Convert to glTF 2.0")]
     Gltf,
 }
 
@@ -175,8 +179,8 @@ impl std::convert::From<&Vec3> for VecRef {
 }
 
 struct GeometryBuffer {
-    file: PathBuf,
     size: usize,
+    offset: usize,
     stride: usize,
     component_type: gltf::ComponentType,
     attribute_type: gltf::AttributeType,
@@ -184,50 +188,51 @@ struct GeometryBuffer {
 
 struct GeometryCache {
     vertices: Vec<Vec3>,
-    indices: Vec<u32>,
     vertex_map: HashMap<VecRef, u32>,
+    line_indices: Vec<u32>,
+    triangle_indices: Vec<u32>,
 }
 
 impl GeometryCache {
     fn new() -> GeometryCache {
         GeometryCache {
             vertices: vec![],
-            indices: vec![],
             vertex_map: HashMap::new(),
+            line_indices: vec![],
+            triangle_indices: vec![],
         }
     }
 
     /// Insert a new vertex and return its index.
-    fn insert(&mut self, vec: &Vec3) -> u32 {
-        if let Some(index) = self.vertex_map.get(&vec.into()) {
-            self.indices.push(*index);
-            *index
-        } else {
-            let index = self.vertices.len();
-            self.vertices.push(vec.clone());
-            let index = index as u32;
-            self.vertex_map.insert(vec.into(), index);
-            self.indices.push(index);
-            index
+    fn insert_vertex(&mut self, vec: &Vec3, transform: &Mat4) -> u32 {
+        let vec4 = Vec4::new(vec.x, vec.y, vec.z, 1.0);
+        let vec = (transform * vec4).truncate();
+        match self.vertex_map.get(&vec.into()) {
+            Some(index) => *index,
+            None => {
+                let index = self.vertices.len();
+                self.vertices.push(vec.clone());
+                let index = index as u32;
+                self.vertex_map.insert(vec.into(), index);
+                index
+            }
         }
     }
 
     fn add_line(&mut self, draw_ctx: &DrawContext, vertices: &[Vec3; 2]) {
-        // TODO : add line primitive (not only triangle)
-        //self.insert(&vertices[0]);
-        //self.insert(&vertices[1]);
+        let i0 = self.insert_vertex(&vertices[0], &draw_ctx.transform);
+        let i1 = self.insert_vertex(&vertices[1], &draw_ctx.transform);
+        self.line_indices.push(i0);
+        self.line_indices.push(i1);
     }
 
     fn add_triangle(&mut self, draw_ctx: &DrawContext, vertices: &[Vec3; 3]) {
-        let v0 = Vec4::new(vertices[0].x, vertices[0].y, vertices[0].z, 1.0);
-        let v0 = (draw_ctx.transform * v0).truncate();
-        self.insert(&v0);
-        let v1 = Vec4::new(vertices[1].x, vertices[1].y, vertices[1].z, 1.0);
-        let v1 = (draw_ctx.transform * v1).truncate();
-        self.insert(&v1);
-        let v2 = Vec4::new(vertices[2].x, vertices[2].y, vertices[2].z, 1.0);
-        let v2 = (draw_ctx.transform * v2).truncate();
-        self.insert(&v2);
+        let i0 = self.insert_vertex(&vertices[0], &draw_ctx.transform);
+        let i1 = self.insert_vertex(&vertices[1], &draw_ctx.transform);
+        let i2 = self.insert_vertex(&vertices[2], &draw_ctx.transform);
+        self.triangle_indices.push(i0);
+        self.triangle_indices.push(i1);
+        self.triangle_indices.push(i2);
     }
 
     fn add_quad(&mut self, draw_ctx: &DrawContext, vertices: &[Vec3; 4]) {
@@ -238,41 +243,59 @@ impl GeometryCache {
     fn write(&self, base_path: &Path) -> Result<(), Error> {
         let json_path = base_path.with_extension("gltf");
 
-        let mut buffers = vec![];
+        let bin_file_path = base_path.with_extension("glbuf");
+        eprintln!("Writing binary buffer file to {:?}", bin_file_path);
+        let mut bin_file = File::create(&bin_file_path).map_err(|e| Error::GltfWrite(e))?;
+        let (vb_size, line_ib_size, tri_ib_size) = self.write_binary_buffers(&mut bin_file)?;
 
-        let vb_file_path = base_path.with_extension("vb.glbuf");
-        eprintln!("Writing VB file to {:?}", vb_file_path);
-        let mut vb_file = File::create(&vb_file_path).map_err(|e| Error::GltfWrite(e))?;
-        let vb_size = self.write_vertex_buffer(&mut vb_file)?;
-        buffers.push(GeometryBuffer {
-            file: vb_file_path,
+        let mut offset: usize = 0;
+        let vertex_buffer = GeometryBuffer {
             size: vb_size,
+            offset,
             stride: 12,
             component_type: gltf::ComponentType::Float,
             attribute_type: gltf::AttributeType::Vec3,
-        });
+        };
+        offset += vb_size;
 
-        let ib_file_path = base_path.with_extension("ib.glbuf");
-        eprintln!("Writing IB file to {:?}", ib_file_path);
-        let mut ib_file = File::create(&ib_file_path).map_err(|e| Error::GltfWrite(e))?;
-        let ib_size = self.write_index_buffer(&mut ib_file)?;
-        buffers.push(GeometryBuffer {
-            file: ib_file_path,
-            size: ib_size,
-            stride: 4,
-            component_type: gltf::ComponentType::UnsignedInt,
-            attribute_type: gltf::AttributeType::Scalar,
-        });
+        let mut index_buffers = vec![];
+        if !self.line_indices.is_empty() {
+            index_buffers.push(GeometryBuffer {
+                size: line_ib_size,
+                offset,
+                stride: 4,
+                component_type: gltf::ComponentType::UnsignedInt,
+                attribute_type: gltf::AttributeType::Scalar,
+            });
+            offset += line_ib_size;
+        }
+        if !self.triangle_indices.is_empty() {
+            index_buffers.push(GeometryBuffer {
+                size: tri_ib_size,
+                offset,
+                stride: 4,
+                component_type: gltf::ComponentType::UnsignedInt,
+                attribute_type: gltf::AttributeType::Scalar,
+            });
+            //offset += tri_ib_size;
+        }
 
         eprintln!("Writing JSON file to {:?}", json_path);
         let mut json_file = File::create(json_path).unwrap();
-        self.write_gltf(&mut json_file, &buffers)
+        self.write_gltf(
+            &mut json_file,
+            &bin_file_path,
+            &vertex_buffer,
+            &index_buffers,
+        )
     }
 
     fn write_gltf<W: Write>(
         &self,
         w: &mut W,
-        geometry_buffers: &[GeometryBuffer],
+        bin_file_path: &PathBuf,
+        vertex_buffer: &GeometryBuffer,
+        index_buffers: &[GeometryBuffer],
     ) -> Result<(), Error> {
         let asset = gltf::Asset {
             version: "2.0".to_string(),
@@ -293,39 +316,69 @@ impl GeometryCache {
         attributes.insert("POSITION".to_string(), 0);
         let mesh = gltf::Mesh {
             name: None,
-            primitives: vec![gltf::Primitive {
-                attributes,
-                indices: 1,
-                mode: gltf::PrimitiveMode::Triangles,
-            }],
+            primitives: [
+                (&self.line_indices, gltf::PrimitiveMode::Lines, 1),
+                (
+                    &self.triangle_indices,
+                    gltf::PrimitiveMode::Triangles,
+                    if self.line_indices.is_empty() { 1 } else { 2 },
+                ),
+            ]
+            .iter()
+            .filter(|(buf, _, _)| !buf.is_empty())
+            .map(|(_, mode, accessor_index)| gltf::Primitive {
+                attributes: attributes.clone(),
+                indices: *accessor_index,
+                mode: *mode,
+            })
+            .collect(),
         };
-        let mut buffers = vec![];
-        let mut buffer_views = vec![];
-        let mut accessors = vec![];
-        let mut buffer_index = 0;
-        for buf in geometry_buffers {
-            buffers.push(gltf::Buffer {
-                name: None,
-                byte_length: buf.size as u32,
-                uri: Some(buf.file.to_str().unwrap().to_string()),
-            });
-            buffer_views.push(gltf::BufferView {
-                name: None,
-                buffer_index,
-                byte_length: buf.size as u32,
+        let total_index_byte_size: usize = index_buffers.iter().map(|buf| buf.size).sum();
+        let total_byte_size = vertex_buffer.size + total_index_byte_size;
+        let buffers = vec![gltf::Buffer {
+            name: None,
+            byte_length: total_byte_size as u32,
+            uri: Some(bin_file_path.to_str().unwrap().to_string()),
+        }];
+        let buffer_views = vec![
+            gltf::BufferView {
+                name: Some("vertex_buffer".to_string()),
+                //target: 34962, // ARRAY_BUFFER
+                buffer_index: 0,
+                byte_length: vertex_buffer.size as u32,
                 byte_offset: 0,
-                byte_stride: Some(buf.stride as u32),
-            });
+                byte_stride: Some(vertex_buffer.stride as u32),
+            },
+            gltf::BufferView {
+                name: Some("index_buffer".to_string()),
+                //target: 34963, // ELEMENT_ARRAY_BUFFER
+                buffer_index: 0,
+                byte_length: total_index_byte_size as u32,
+                byte_offset: vertex_buffer.size as u32,
+                byte_stride: Some(4), // TODO: do not hardcode
+            },
+        ];
+        let mut accessors = vec![gltf::Accessor {
+            name: Some("vertex_data".to_string()),
+            component_type: vertex_buffer.component_type,
+            count: (vertex_buffer.size / vertex_buffer.stride) as u32,
+            attribute_type: vertex_buffer.attribute_type,
+            buffer_view_index: 0,
+            byte_offset: 0,
+            normalized: false,
+        }];
+        let mut byte_offset = 0;
+        for buf in index_buffers {
             accessors.push(gltf::Accessor {
-                name: None,
+                name: Some("index_data".to_string()),
                 component_type: buf.component_type,
                 count: (buf.size / buf.stride) as u32,
                 attribute_type: buf.attribute_type,
-                buffer_view_index: buffer_index,
-                byte_offset: 0,
+                buffer_view_index: 1,
+                byte_offset,
                 normalized: false,
             });
-            buffer_index += 1;
+            byte_offset += buf.size as u32;
         }
         let gltf = gltf::Gltf {
             asset,
@@ -343,18 +396,24 @@ impl GeometryCache {
         w.write_all(buf).map_err(|e| Error::GltfWrite(e))
     }
 
-    fn write_vertex_buffer<W: Write>(&self, w: &mut W) -> Result<usize, Error> {
+    fn write_binary_buffers<W: Write>(&self, w: &mut W) -> Result<(usize, usize, usize), Error> {
         let vertices = &self.vertices[..];
-        let bytes: &[u8] = unsafe { as_u8_slice(vertices) };
-        w.write_all(bytes).map_err(|e| Error::GltfWrite(e))?;
-        Ok(bytes.len())
-    }
-
-    fn write_index_buffer<W: Write>(&self, w: &mut W) -> Result<usize, Error> {
-        let indices = &self.indices[..];
-        let bytes: &[u8] = unsafe { as_u8_slice(indices) };
-        w.write_all(bytes).map_err(|e| Error::GltfWrite(e))?;
-        Ok(bytes.len())
+        let vertices_bytes: &[u8] = unsafe { as_u8_slice(vertices) };
+        w.write_all(vertices_bytes)
+            .map_err(|e| Error::GltfWrite(e))?;
+        let line_indices = &self.line_indices[..];
+        let line_indices_bytes: &[u8] = unsafe { as_u8_slice(line_indices) };
+        w.write_all(line_indices_bytes)
+            .map_err(|e| Error::GltfWrite(e))?;
+        let triangle_indices = &self.triangle_indices[..];
+        let triangle_indices_bytes: &[u8] = unsafe { as_u8_slice(triangle_indices) };
+        w.write_all(triangle_indices_bytes)
+            .map_err(|e| Error::GltfWrite(e))?;
+        Ok((
+            vertices_bytes.len(),
+            line_indices_bytes.len(),
+            triangle_indices_bytes.len(),
+        ))
     }
 }
 
@@ -366,8 +425,8 @@ unsafe fn as_u8_slice<T: Sized>(p: &[T]) -> &[u8] {
     )
 }
 
-fn convert(app: &mut App, input: PathBuf) -> Result<(), Error> {
-    let input = input.to_str();
+fn convert(app: &mut App, args: &ConvertCommand) -> Result<(), Error> {
+    let input = args.input.to_str();
     if input.is_none() {
         app.print_error_and_exit("Input filename contains invalid UTF-8 characters.");
     }
@@ -384,19 +443,27 @@ fn convert(app: &mut App, input: PathBuf) -> Result<(), Error> {
     for (draw_ctx, cmd) in source_file.iter(&source_map) {
         eprintln!("  cmd: {:?}", cmd);
         match cmd {
-            Command::Line(l) => geometry_cache.add_line(&draw_ctx, &l.vertices),
+            Command::Line(l) => {
+                if args.with_lines {
+                    geometry_cache.add_line(&draw_ctx, &l.vertices)
+                }
+            }
             Command::Triangle(t) => geometry_cache.add_triangle(&draw_ctx, &t.vertices),
             Command::Quad(q) => geometry_cache.add_quad(&draw_ctx, &q.vertices),
-            Command::OptLine(l) => geometry_cache.add_line(&draw_ctx, &l.vertices),
+            Command::OptLine(l) => {
+                if args.with_lines {
+                    geometry_cache.add_line(&draw_ctx, &l.vertices)
+                }
+            }
             _ => {}
         }
     }
-    for v in &geometry_cache.vertices {
-        eprintln!("vec: {:?}", v);
-    }
-    for i in &geometry_cache.indices {
-        eprintln!("idx: {:?}", i);
-    }
+    // for v in &geometry_cache.vertices {
+    //     eprintln!("vec: {:?}", v);
+    // }
+    // for i in &geometry_cache.indices {
+    //     eprintln!("idx: {:?}", i);
+    // }
 
     let json_path = resolver.resolve_path(input)?;
     geometry_cache.write(&json_path)
@@ -410,7 +477,7 @@ fn main() -> Result<(), Error> {
     };
 
     let res = match args.cmd {
-        Cmd::Convert(conv) => convert(&mut app, conv.input),
+        Cmd::Convert(conv) => convert(&mut app, &conv),
     };
     if let Err(e) = res {
         match e {
@@ -596,23 +663,26 @@ mod tests {
     fn test_geocache_insert() {
         let mut geo = GeometryCache::new();
         // First vertex always inserts
-        let index = geo.insert(&Vec3::new(0.0, 1.0, 2.0));
+        let index = geo.insert_vertex(&Vec3::new(0.0, 1.0, 2.0), &Mat4::from_scale(1.0));
         assert_eq!(0, index);
         assert_eq!(1, geo.vertex_map.len());
         assert_eq!(1, geo.vertices.len());
-        assert_eq!(1, geo.indices.len());
-        // Duplicate vertex inserts index only
-        let index = geo.insert(&Vec3::new(0.0, 1.0, 2.0));
+        assert_eq!(0, geo.line_indices.len());
+        assert_eq!(0, geo.triangle_indices.len());
+        // Duplicate vertex
+        let index = geo.insert_vertex(&Vec3::new(0.0, 1.0, 2.0), &Mat4::from_scale(1.0));
         assert_eq!(0, index);
         assert_eq!(1, geo.vertex_map.len());
         assert_eq!(1, geo.vertices.len());
-        assert_eq!(2, geo.indices.len());
-        // New unique vertex inserts both index and vertex
-        let index = geo.insert(&Vec3::new(-5.0, 1.0, 2.0));
+        assert_eq!(0, geo.line_indices.len());
+        assert_eq!(0, geo.triangle_indices.len());
+        // New unique vertex
+        let index = geo.insert_vertex(&Vec3::new(-5.0, 1.0, 2.0), &Mat4::from_scale(1.0));
         assert_eq!(1, index);
         assert_eq!(2, geo.vertices.len());
         assert_eq!(2, geo.vertex_map.len());
-        assert_eq!(3, geo.indices.len());
+        assert_eq!(0, geo.line_indices.len());
+        assert_eq!(0, geo.triangle_indices.len());
     }
 
     #[test]
@@ -626,9 +696,10 @@ mod tests {
             &draw_ctx,
             &[Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0)],
         );
-        //assert_eq!(2, geo.vertices.len());
-        //assert_eq!(2, geo.vertex_map.len());
-        //assert_eq!(2, geo.indices.len());
+        assert_eq!(2, geo.vertices.len());
+        assert_eq!(2, geo.vertex_map.len());
+        assert_eq!(2, geo.line_indices.len());
+        assert_eq!(0, geo.triangle_indices.len());
     }
 
     #[test]
@@ -648,7 +719,8 @@ mod tests {
         );
         assert_eq!(3, geo.vertices.len());
         assert_eq!(3, geo.vertex_map.len());
-        assert_eq!(3, geo.indices.len());
+        assert_eq!(0, geo.line_indices.len());
+        assert_eq!(3, geo.triangle_indices.len());
     }
 
     #[test]
@@ -670,7 +742,8 @@ mod tests {
         // Quad is made of 2 triangles (6 indices)
         assert_eq!(4, geo.vertices.len());
         assert_eq!(4, geo.vertex_map.len());
-        assert_eq!(6, geo.indices.len());
+        assert_eq!(0, geo.line_indices.len());
+        assert_eq!(6, geo.triangle_indices.len());
     }
 
     struct TestWriter {}
@@ -702,16 +775,24 @@ mod tests {
             ],
         );
         let mut writer = TestWriter {};
-        assert!(geo.write_vertex_buffer(&mut writer).is_ok());
-        assert!(geo.write_index_buffer(&mut writer).is_ok());
-        let mut geometry_buffers = vec![];
-        geometry_buffers.push(GeometryBuffer {
-            file: PathBuf::new(),
+        assert!(geo.write_binary_buffers(&mut writer).is_ok());
+        let vertex_buffer = GeometryBuffer {
+            offset: 0,
             size: 12,
             stride: 12,
             component_type: gltf::ComponentType::Float,
             attribute_type: gltf::AttributeType::Vec3,
+        };
+        let mut index_buffers = vec![];
+        index_buffers.push(GeometryBuffer {
+            offset: 0,
+            size: 12,
+            stride: 4,
+            component_type: gltf::ComponentType::UnsignedInt,
+            attribute_type: gltf::AttributeType::Scalar,
         });
-        assert!(geo.write_gltf(&mut writer, &geometry_buffers).is_ok());
+        assert!(geo
+            .write_gltf(&mut writer, &PathBuf::new(), &vertex_buffer, &index_buffers)
+            .is_ok());
     }
 }
