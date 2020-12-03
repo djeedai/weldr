@@ -651,7 +651,7 @@ pub struct DrawContext {
     /// When drawing a primitive (line, triangle, quad), the actual position of vertices is obtained
     /// by transforming the local-space positions of the drawing command by this transformation matrix.
     ///
-    /// ```rust
+    /// ```rustc,ignore
     /// let v0 = draw_ctx.transform * cmd.vertices[0];
     /// ```
     pub transform: Mat4,
