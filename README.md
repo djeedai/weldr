@@ -12,7 +12,7 @@ This repository is a Cargo workspace composed of the following packages:
 | Crate | Version | Description | Path |
 |---|---|---|---|
 | [📦 `weldr`](https://crates.io/crates/weldr) | [![Crates.io Version](https://img.shields.io/crates/v/weldr.svg)](https://crates.io/crates/weldr) | The weldr Rust library | [`lib/`](./lib) |
-| [📦 `weldr-bin`](https://crates.io/crates/weldr-bin) | [![Crates.io Version](https://img.shields.io/crates/v/weldr-bin.svg)](https://crates.io/crates/weldr) | The ⚙ `weldr` command-line tool | [`bin/weldr/`](./bin/weldr) |
+| [📦 `weldr-bin`](https://crates.io/crates/weldr-bin) | [![Crates.io Version](https://img.shields.io/crates/v/weldr-bin.svg)](https://crates.io/crates/weldr-bin) | The ⚙ `weldr` command-line tool | [`bin/weldr/`](./bin/weldr) |
 
 ## Library
 
