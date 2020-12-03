@@ -8,7 +8,7 @@ mod gltf;
 
 use error::Error;
 
-use ansi_term::Color::Red;
+use ansi_term::Color::{Red, Yellow};
 use ordered_float::NotNan;
 use std::{
     collections::HashMap,
@@ -50,6 +50,30 @@ struct ConvertCommand {
     /// Output line segments in addition of surfaces (triangles/quads).
     #[structopt(long = "lines", short = "l", takes_value = false)]
     with_lines: bool,
+
+    /// Add the given location to the list of search paths for resolving parts.
+    ///
+    /// The location is appended to the list of search paths, in addition of the canonical paths derived
+    /// from the catalog location. This option can be used multiple times to add more search paths.
+    #[structopt(
+        long = "include-path",
+        short = "I",
+        value_name = "PATH",
+        // multiple=true + number_of_values=1 => can appear multiple times, with one value per occurrence
+        multiple = true,
+        number_of_values = 1
+    )]
+    include_paths: Option<Vec<PathBuf>>,
+
+    /// Set the root location of the official LDraw catalog for resolving parts.
+    ///
+    /// This option adds the following search paths to the list of paths to resolve sub-file references from:
+    /// - <PATH>/p
+    /// - <PATH>/p/48
+    /// - <PATH>/parts
+    /// - <PATH>/parts/s
+    #[structopt(long = "catalog-path", short = "C", value_name = "PATH")]
+    catalog_path: Option<PathBuf>,
 }
 
 #[derive(StructOpt)]
@@ -92,8 +116,8 @@ impl DiskResolver {
         DiskResolver { base_paths: vec![] }
     }
 
-    fn new_from_root(root_path: &str) -> DiskResolver {
-        let root = PathBuf::from(root_path);
+    fn new_from_root<P: AsRef<Path>>(root_path: P) -> DiskResolver {
+        let root = root_path.as_ref().to_path_buf();
         let base_paths = vec![
             root.join("p"),
             root.join("p").join("48"),
@@ -101,6 +125,10 @@ impl DiskResolver {
             root.join("parts").join("s"),
         ];
         DiskResolver { base_paths }
+    }
+
+    fn add_path<P: AsRef<Path>>(&mut self, path: P) {
+        self.base_paths.push(path.as_ref().to_path_buf());
     }
 
     /// Resolve a relative LDraw filename reference into an actual path on disk.
@@ -432,8 +460,29 @@ fn convert(app: &mut App, args: &ConvertCommand) -> Result<(), Error> {
     }
     let input = input.unwrap();
 
+    let mut resolver = DiskResolver::new();
+    if let Some(catalog_path) = &args.catalog_path {
+        resolver = DiskResolver::new_from_root(catalog_path);
+    } else if let Ok(cwd) = std::env::current_dir() {
+        eprintln!(
+            "{}: No catalog path specified; using current working directory: {}",
+            Yellow.paint("warning"),
+            cwd.to_str().unwrap_or("(invalid path)")
+        );
+        resolver = DiskResolver::new_from_root(cwd);
+    } else {
+        app.print_error_and_exit(
+            "No include/catalog path specified, and cannot use current directory. \
+        Use -C/--catalog-path to specify the location of the catalog.",
+        )
+    }
+    if let Some(include_paths) = &args.include_paths {
+        for path in include_paths {
+            resolver.add_path(path);
+        }
+    }
+
     eprintln!("Parsing file '{}'", input);
-    let resolver = DiskResolver::new_from_root("F:\\dev\\weldr\\data");
     let mut source_map = weldr::SourceMap::new();
     let source_file_ref = weldr::parse(input, &resolver, &mut source_map)?;
 
