@@ -19,21 +19,23 @@ Use the `weldr` crate to parse the content of a single LDraw file containing 2 c
 ```rust
 extern crate weldr;
 
-use weldr::{parse_raw, CommandType, CommentCmd, LineCmd, Vec3};
+use weldr::{parse_raw, Command, CommentCmd, LineCmd, Vec3};
 
 fn main() {}
 
 #[test]
-fn test_weldr() {
-  let cmd0 = CommandType::Comment(CommentCmd{ text: "this is a comment".to_string() });
-  let cmd1 = CommandType::Line(LineCmd{
+fn parse_ldr() {
+  let ldr = b"0 this is a comment\n2 16 0 0 0 1 1 1";
+  let cmds = parse_raw(ldr);
+  let cmd0 = Command::Comment(CommentCmd::new("this is a comment"));
+  let cmd1 = Command::Line(LineCmd{
     color: 16,
     vertices: [
       Vec3{ x: 0.0, y: 0.0, z: 0.0 },
       Vec3{ x: 1.0, y: 1.0, z: 1.0 }
     ]
   });
-  assert_eq!(parse_raw(b"0 this is a comment\n2 16 0 0 0 1 1 1"), vec![cmd0, cmd1]);
+  assert_eq!(cmds, vec![cmd0, cmd1]);
 }
 ```
 
