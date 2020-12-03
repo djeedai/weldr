@@ -32,14 +32,6 @@ Topical help for a specific subcommand (_e.g._ "`convert`") can be displayed wit
 weldr <SUBCOMMAND> --help
 ```
 
-## Documentation
-
-[Reference documentation](https://docs.rs/weldr-bin)
-
-## Rust version requirements
-
-weldr is tested with `rustc` **version 1.44**, **stable**, and **beta**, although older versions may work, but have never been tested.
-
 ## Installation
 
 ### Cargo
@@ -53,6 +45,22 @@ cargo install weldr-bin
 ### Binary download
 
 Prebuilt binaries for supported platforms are available on the [GitHub Releases](https://github.com/djeedai/weldr/releases) page.
+
+## Offcial LDraw catalog
+
+The official LDraw catalog of parts is available at <https://www.ldraw.org/library/updates/complete.zip>. Download the catalog and unzip it somewhere locally, then use the `--catalog-path`/`-C` option to specify the location where the root folders are located (the `p` and `parts` folders), to allow ⚙ `weldr` to resolve files and all their sub-file references. By default the current working directory is used.
+
+Example:
+
+```shell
+> curl https://www.ldraw.org/library/updates/complete.zip --output complete.zip
+> unzip complete.zip -d ./ldraw_parts
+> weldr convert -C ./ldraw_parts 6143.dat gltf
+```
+
+## Rust version requirements
+
+weldr is tested with `rustc` **version 1.44**, **stable**, and **beta**, although older versions may work, but have never been tested.
 
 ## Copyrights
 

@@ -53,7 +53,7 @@ The weldr command-line tool ⚙ `weldr` is an executable to manipulate LDraw fil
 Convert an LDraw file to a glTF 2.0 file:
 
 ```shell
-weldr convert 5-8cyli.dat gltf
+weldr convert --catalog-path path/to/ldraw/catalog 5-8cyli.dat gltf
 ```
 
 The format is:
@@ -63,6 +63,8 @@ weldr <COMMAND> <INPUT>
 ```
 
 You can get the list of commands with `weldr --help`. Currently only the `convert` command is implemented for the `gltf` (glTF 2.0) format.
+
+The official LDraw catalog of parts is available at <https://www.ldraw.org/library/updates/complete.zip>. When using it, use the `--catalog-path` to specify the location where it was downloaded, to allow ⚙ `weldr` to resolve files and all their sub-file references. By default the current working directory is used.
 
 ## Copyrights
 
