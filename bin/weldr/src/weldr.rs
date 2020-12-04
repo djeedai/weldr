@@ -3,13 +3,15 @@
 
 #![allow(dead_code)]
 
+mod convert;
 mod error;
 mod gltf;
 
 #[macro_use]
 extern crate log;
 
-use error::{Error, Utf8Error};
+use convert::ConvertCommand;
+use error::Error;
 
 use ansi_term::Color::{Blue, Purple, Red, Yellow};
 use log::{Level, Metadata, Record};
@@ -22,7 +24,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use structopt::StructOpt;
-use weldr::{Command, DrawContext, FileRefResolver, Mat4, ResolveError, Vec3, Vec4};
+use weldr::{DrawContext, FileRefResolver, Mat4, ResolveError, Vec3, Vec4};
 
 struct SimpleLogger;
 
@@ -59,55 +61,9 @@ enum Cmd {
     Convert(ConvertCommand),
 }
 
-#[derive(StructOpt)]
-#[structopt(name = "convert", about = "Convert LDraw file to another format")]
-struct ConvertCommand {
-    /// Target format, one of "gltf"
-    #[structopt(subcommand)]
-    format: ConvertFormat,
-
-    /// Input LDraw file to convert
-    #[structopt(parse(from_os_str))]
-    input: PathBuf,
-
-    /// Output file, stdout if not present
-    #[structopt(parse(from_os_str), long = "output", short = "o", value_name = "FILE")]
-    output: Option<PathBuf>,
-
-    /// Output line segments in addition of surfaces (triangles/quads).
-    #[structopt(long = "lines", short = "l", takes_value = false)]
-    with_lines: bool,
-
-    /// Add the given location to the list of search paths for resolving parts.
-    ///
-    /// The location is appended to the list of search paths, in addition of the canonical paths derived
-    /// from the catalog location. This option can be used multiple times to add more search paths.
-    #[structopt(
-        long = "include-path",
-        short = "I",
-        value_name = "PATH",
-        // multiple=true + number_of_values=1 => can appear multiple times, with one value per occurrence
-        multiple = true,
-        number_of_values = 1
-    )]
-    include_paths: Option<Vec<PathBuf>>,
-
-    /// Set the root location of the official LDraw catalog for resolving parts.
-    ///
-    /// This option adds the following search paths to the list of paths to resolve sub-file references from:
-    /// - <PATH>/p
-    /// - <PATH>/p/48
-    /// - <PATH>/parts
-    /// - <PATH>/parts/s
-    #[structopt(long = "catalog-path", short = "C", value_name = "PATH")]
-    catalog_path: Option<PathBuf>,
-}
-
-#[derive(StructOpt)]
-#[structopt(display_order = 1)]
-enum ConvertFormat {
-    #[structopt(about = "Convert to glTF 2.0")]
-    Gltf,
+/// A top-level action to be performed by the executable, like e.g. 'convert'.
+trait Action {
+    fn exec(&mut self) -> Result<(), Error>;
 }
 
 struct App<'a, 'b> {
@@ -483,67 +439,6 @@ unsafe fn as_u8_slice<T: Sized>(p: &[T]) -> &[u8] {
     )
 }
 
-fn convert(args: &ConvertCommand) -> Result<(), Error> {
-    let input = args.input.to_str();
-    if input.is_none() {
-        return Err(Error::InvalidUtf8(Utf8Error::new("input filename")));
-    }
-    let input = input.unwrap();
-
-    let mut resolver: DiskResolver;
-    if let Some(catalog_path) = &args.catalog_path {
-        resolver = DiskResolver::new_from_root(catalog_path);
-    } else if let Ok(cwd) = std::env::current_dir() {
-        warn!(
-            "No catalog path specified; using current working directory: {}",
-            cwd.to_str().unwrap_or("(invalid path)")
-        );
-        resolver = DiskResolver::new_from_root(cwd);
-    } else {
-        return Err(Error::NoLDrawCatalog);
-    }
-    if let Some(include_paths) = &args.include_paths {
-        for path in include_paths {
-            resolver.add_path(path);
-        }
-    }
-
-    info!("Parsing file '{}'", input);
-    let mut source_map = weldr::SourceMap::new();
-    let source_file_ref = weldr::parse(input, &resolver, &mut source_map)?;
-
-    info!("Converting file '{}' to {} format", input, "gltf");
-    let mut geometry_cache = GeometryCache::new();
-    let source_file = source_file_ref.get(&source_map);
-    for (draw_ctx, cmd) in source_file.iter(&source_map) {
-        debug!("  cmd: {:?}", cmd);
-        match cmd {
-            Command::Line(l) => {
-                if args.with_lines {
-                    geometry_cache.add_line(&draw_ctx, &l.vertices)
-                }
-            }
-            Command::Triangle(t) => geometry_cache.add_triangle(&draw_ctx, &t.vertices),
-            Command::Quad(q) => geometry_cache.add_quad(&draw_ctx, &q.vertices),
-            Command::OptLine(l) => {
-                if args.with_lines {
-                    geometry_cache.add_line(&draw_ctx, &l.vertices)
-                }
-            }
-            _ => {}
-        }
-    }
-    // for v in &geometry_cache.vertices {
-    //     trace!("vec: {:?}", v);
-    // }
-    // for i in &geometry_cache.indices {
-    //     trace!("idx: {:?}", i);
-    // }
-
-    let json_path = resolver.resolve_path(input)?;
-    geometry_cache.write(&json_path)
-}
-
 static LOGGER: SimpleLogger = SimpleLogger {};
 
 #[cfg(not(tarpaulin_include))]
@@ -558,7 +453,7 @@ fn main() -> Result<(), Error> {
     };
 
     let res = match args.cmd {
-        Cmd::Convert(conv) => convert(&conv),
+        Cmd::Convert(mut conv) => conv.exec(),
     };
     if let Err(e) = res {
         error!("{}", e);
