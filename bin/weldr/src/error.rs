@@ -22,6 +22,9 @@ pub enum Error {
     /// An error encountered when converting a Path/Buf to an UTF-8 string.
     InvalidUtf8(Utf8Error),
 
+    /// An error encountered when some entity is not found.
+    NotFound(String),
+
     /// An error encountered when there is no LDraw catalog to resolve filenames from.
     NoLDrawCatalog,
 }
@@ -53,6 +56,7 @@ impl fmt::Display for Error {
             Error::JsonWrite(json_err) => write!(f, "error writing JSON: {}", json_err),
             Error::GltfWrite(io_err) => write!(f, "error writing glTF: {}", io_err),
             Error::InvalidUtf8(utf8_err) => write!(f, "invalid UTF-8 string: {}", utf8_err.context),
+            Error::NotFound(desc) => write!(f, "{} (not found)", desc),
             Error::NoLDrawCatalog => write!(
                 f,
                 "No include/catalog path specified, and cannot use current directory. \
