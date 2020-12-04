@@ -155,7 +155,10 @@ impl DiskResolver {
     }
 
     fn add_path<P: AsRef<Path>>(&mut self, path: P) {
-        self.base_paths.push(path.as_ref().to_path_buf());
+        let path = path.as_ref();
+        if self.base_paths.iter().find(|p| *p == path).is_none() {
+            self.base_paths.push(path.to_path_buf());
+        }
     }
 
     /// Resolve a relative LDraw filename reference into an actual path on disk.
@@ -603,6 +606,7 @@ fn main() -> Result<(), Error> {
 mod tests {
 
     use super::*;
+    use log::Log;
 
     #[test]
     fn test_as_u8_slice() {
@@ -618,8 +622,24 @@ mod tests {
     }
 
     #[test]
+    fn test_disk_resolver_add_path() {
+        let mut resolver = DiskResolver::new();
+        assert!(resolver.base_paths.is_empty());
+        resolver.add_path("path1");
+        assert_eq!(1, resolver.base_paths.len());
+        assert_eq!("path1", resolver.base_paths[0].to_str().unwrap());
+        resolver.add_path("path1"); // duplicate is no-op
+        assert_eq!(1, resolver.base_paths.len());
+        assert_eq!("path1", resolver.base_paths[0].to_str().unwrap());
+        resolver.add_path("path2");
+        assert_eq!(2, resolver.base_paths.len());
+        assert_eq!("path1", resolver.base_paths[0].to_str().unwrap());
+        assert_eq!("path2", resolver.base_paths[1].to_str().unwrap());
+    }
+
+    #[test]
     fn test_disk_resolver_new_from_root() {
-        let resolver = DiskResolver::new_from_root("root");
+        let mut resolver = DiskResolver::new_from_root("root");
         assert_eq!(4, resolver.base_paths.len());
         assert!(resolver
             .base_paths
@@ -640,6 +660,13 @@ mod tests {
             .base_paths
             .iter()
             .find(|&p| { *p == Path::new("root").join("parts").join("s") })
+            .is_some());
+        resolver.add_path("path1");
+        assert_eq!(5, resolver.base_paths.len());
+        assert!(resolver
+            .base_paths
+            .iter()
+            .find(|&p| { *p == Path::new("path1") })
             .is_some());
     }
 
@@ -826,13 +853,20 @@ mod tests {
     struct TestWriter {}
 
     impl std::io::Write for TestWriter {
-        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
-            Ok(1)
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            Ok(buf.len())
         }
 
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn test_writer() {
+        let mut writer = TestWriter {};
+        assert_eq!(4, writer.write(b"test").unwrap());
+        assert!(writer.flush().is_ok());
     }
 
     #[test]
@@ -871,5 +905,23 @@ mod tests {
         assert!(geo
             .write_gltf(&mut writer, &PathBuf::new(), &vertex_buffer, &index_buffers)
             .is_ok());
+    }
+
+    #[test]
+    fn test_simple_logger() {
+        let logger = SimpleLogger {};
+
+        let rec = log::RecordBuilder::new()
+            .file(Some("filename"))
+            .line(Some(32))
+            .build();
+        logger.log(&rec);
+        logger.flush();
+
+        let metadata = log::MetadataBuilder::new()
+            .level(log::Level::Error)
+            .target("target")
+            .build();
+        assert!(logger.enabled(&metadata));
     }
 }
