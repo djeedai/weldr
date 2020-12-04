@@ -18,6 +18,12 @@ pub enum Error {
 
     /// An error encountered while exporting to glTF.
     GltfWrite(std::io::Error),
+
+    /// An error encountered when converting a Path/Buf to an UTF-8 string.
+    InvalidUtf8(Utf8Error),
+
+    /// An error encountered when there is no LDraw catalog to resolve filenames from.
+    NoLDrawCatalog,
 }
 
 impl fmt::Display for Error {
@@ -30,13 +36,28 @@ impl fmt::Display for Error {
             Error::Resolve(ResolveError {
                 filename,
                 resolve_error,
-            }) => write!(
-                f,
-                "resolve error for filename '{}': {:?}",
-                filename, resolve_error
-            ),
+            }) => {
+                write!(
+                    f,
+                    "resolve error for filename '{}': {:?}",
+                    filename, resolve_error
+                )?;
+                if let Some(e) = resolve_error {
+                    write!(f, "       {}", e)?;
+                    while let Some(e) = e.source() {
+                        write!(f, "       {}", e)?;
+                    }
+                }
+                Ok(())
+            }
             Error::JsonWrite(json_err) => write!(f, "error writing JSON: {}", json_err),
             Error::GltfWrite(io_err) => write!(f, "error writing glTF: {}", io_err),
+            Error::InvalidUtf8(utf8_err) => write!(f, "invalid UTF-8 string: {}", utf8_err.context),
+            Error::NoLDrawCatalog => write!(
+                f,
+                "No include/catalog path specified, and cannot use current directory. \
+                Use -C/--catalog-path to specify the location of the catalog."
+            ),
         }
     }
 }
@@ -81,6 +102,30 @@ impl From<weldr::Error> for Error {
             weldr::Error::Resolve(e) => Error::Resolve(e),
             weldr::Error::Parse(e) => Error::Parse(e),
         }
+    }
+}
+
+/// Error related to an invalid UTF-8 string.
+///
+/// This error is raised either when an argument passed to a function contains an invalid
+/// UTF-8 sequence, or when such invalid sequence is obtained after manipulating other data.
+#[derive(Debug)]
+pub struct Utf8Error {
+    /// Some free-form context about the operation which led to the invalid UTF-8 sequence.
+    pub context: String,
+}
+
+impl Utf8Error {
+    pub fn new(context: &str) -> Self {
+        Utf8Error {
+            context: context.to_string(),
+        }
+    }
+}
+
+impl From<Utf8Error> for Error {
+    fn from(e: Utf8Error) -> Self {
+        Error::InvalidUtf8(e)
     }
 }
 
@@ -151,6 +196,14 @@ mod tests {
         assert!(matches!(&error, Error::GltfWrite(_)));
         if let Error::GltfWrite(gltf_error) = &error {
             assert_eq!(std::io::ErrorKind::NotFound, gltf_error.kind());
+        }
+
+        let utf8_err = Utf8Error::new("context string");
+        let error: Error = utf8_err.into();
+        println!("err: {}", error);
+        assert!(matches!(&error, Error::InvalidUtf8(_)));
+        if let Error::InvalidUtf8(utf8_err) = &error {
+            assert_eq!("context string", utf8_err.context);
         }
     }
 }

@@ -9,7 +9,7 @@ mod gltf;
 #[macro_use]
 extern crate log;
 
-use error::Error;
+use error::{Error, Utf8Error};
 
 use ansi_term::Color::{Blue, Purple, Red, Yellow};
 use log::{Level, Metadata, Record};
@@ -475,7 +475,7 @@ impl GeometryCache {
     }
 }
 
-/// Transform a slice of something sized into a slice of u8 for binary writing.
+/// Transform a slice of something sized into a slice of u8, for binary writing.
 unsafe fn as_u8_slice<T: Sized>(p: &[T]) -> &[u8] {
     ::std::slice::from_raw_parts(
         p.as_ptr() as *const u8,
@@ -483,14 +483,14 @@ unsafe fn as_u8_slice<T: Sized>(p: &[T]) -> &[u8] {
     )
 }
 
-fn convert(app: &mut App, args: &ConvertCommand) -> Result<(), Error> {
+fn convert(args: &ConvertCommand) -> Result<(), Error> {
     let input = args.input.to_str();
     if input.is_none() {
-        app.print_error_and_exit("Input filename contains invalid UTF-8 characters.");
+        return Err(Error::InvalidUtf8(Utf8Error::new("input filename")));
     }
     let input = input.unwrap();
 
-    let mut resolver = DiskResolver::new();
+    let mut resolver: DiskResolver;
     if let Some(catalog_path) = &args.catalog_path {
         resolver = DiskResolver::new_from_root(catalog_path);
     } else if let Ok(cwd) = std::env::current_dir() {
@@ -500,10 +500,7 @@ fn convert(app: &mut App, args: &ConvertCommand) -> Result<(), Error> {
         );
         resolver = DiskResolver::new_from_root(cwd);
     } else {
-        app.print_error_and_exit(
-            "No include/catalog path specified, and cannot use current directory. \
-        Use -C/--catalog-path to specify the location of the catalog.",
-        )
+        return Err(Error::NoLDrawCatalog);
     }
     if let Some(include_paths) = &args.include_paths {
         for path in include_paths {
@@ -547,7 +544,7 @@ fn convert(app: &mut App, args: &ConvertCommand) -> Result<(), Error> {
     geometry_cache.write(&json_path)
 }
 
-static LOGGER: SimpleLogger = SimpleLogger;
+static LOGGER: SimpleLogger = SimpleLogger {};
 
 #[cfg(not(tarpaulin_include))]
 fn main() -> Result<(), Error> {
@@ -556,37 +553,16 @@ fn main() -> Result<(), Error> {
         .unwrap();
 
     let args = CliArgs::from_args();
-    let mut app = App {
+    let app = App {
         cli: CliArgs::clap(),
     };
 
     let res = match args.cmd {
-        Cmd::Convert(conv) => convert(&mut app, &conv),
+        Cmd::Convert(conv) => convert(&conv),
     };
     if let Err(e) = res {
-        match e {
-            Error::Parse(parse_err) => {
-                app.print_error_and_exit(
-                    &format!("failed to parse LDraw file '{}'.", parse_err.filename)[..],
-                );
-            }
-            Error::Resolve(resolve_err) => {
-                error!("cannot resolve filename '{}'.", resolve_err.filename);
-                if let Some(e) = resolve_err.resolve_error {
-                    error!("       {}", e);
-                    while let Some(e) = e.source() {
-                        error!("       {}", e);
-                    }
-                }
-                app.exit(1);
-            }
-            Error::JsonWrite(json_err) => {
-                app.print_error_and_exit(&format!("failed to write JSON: {}", json_err)[..]);
-            }
-            Error::GltfWrite(io_err) => {
-                app.print_error_and_exit(&format!("failed to write glTF: {}", io_err)[..]);
-            }
-        }
+        error!("{}", e);
+        app.exit(1);
     }
 
     let buf = gltf::Buffer::new(32).uri("buf1.glb");
