@@ -152,7 +152,7 @@ mod tests {
     #[test]
     fn test_error() {
         match get_error() {
-            Err(e) => println!("Error: {}", e),
+            Err(e) => eprintln!("Error: {}", e),
             _ => {}
         };
     }
@@ -171,7 +171,7 @@ mod tests {
     fn test_from() {
         let resolve_error = ResolveError::new_raw("file");
         let error: Error = resolve_error.into();
-        println!("err: {}", error);
+        eprintln!("err: {}", error);
         assert!(matches!(&error, Error::Resolve(_)));
         if let Error::Resolve(resolve_error) = &error {
             assert_eq!(resolve_error.filename, "file");
@@ -179,7 +179,7 @@ mod tests {
 
         let parse_error = ParseError::new("file", error);
         let error: Error = parse_error.into();
-        println!("err: {}", error);
+        eprintln!("err: {}", error);
         assert!(matches!(&error, Error::Parse(_)));
         if let Error::Parse(parse_error) = &error {
             assert_eq!(parse_error.filename, "file");
@@ -187,7 +187,7 @@ mod tests {
 
         let json_error = serde_json::from_str::<Dummy>(&"{[}"[..]).unwrap_err();
         let error: Error = json_error.into();
-        println!("err: {}", error);
+        eprintln!("err: {}", error);
         assert!(matches!(&error, Error::JsonWrite(_)));
         if let Error::JsonWrite(json_error) = &error {
             assert!(json_error.is_syntax());
@@ -196,7 +196,7 @@ mod tests {
         let io_err = std::fs::File::open("_()__doesn't exist__()_").unwrap_err();
         let gltf_error = Error::GltfWrite(io_err);
         let error: Error = gltf_error.into();
-        println!("err: {}", error);
+        eprintln!("err: {}", error);
         assert!(matches!(&error, Error::GltfWrite(_)));
         if let Error::GltfWrite(gltf_error) = &error {
             assert_eq!(std::io::ErrorKind::NotFound, gltf_error.kind());
@@ -204,7 +204,7 @@ mod tests {
 
         let utf8_err = Utf8Error::new("context string");
         let error: Error = utf8_err.into();
-        println!("err: {}", error);
+        eprintln!("err: {}", error);
         assert!(matches!(&error, Error::InvalidUtf8(_)));
         if let Error::InvalidUtf8(utf8_err) = &error {
             assert_eq!("context string", utf8_err.context);

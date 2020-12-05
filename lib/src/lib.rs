@@ -68,6 +68,9 @@
 #[macro_use]
 extern crate nom;
 
+#[macro_use]
+extern crate log;
+
 extern crate cgmath;
 
 use nom::{
@@ -866,9 +869,9 @@ pub fn parse(
     if let Some(existing_file) = source_map.find_filename(filename) {
         return Ok(existing_file);
     }
-    println!("Loading root file: {}", filename);
+    info!("Parsing file: {}", filename);
     let root_file = load_and_parse_single_file(filename, resolver)?;
-    println!(
+    trace!(
         "Post-loading resolving subfile refs of root file: {}",
         filename
     );
@@ -878,14 +881,14 @@ pub fn parse(
     while let Some(queued_file) = queue.pop(source_map) {
         let num_pending_left = queued_file.1;
         let filename = &queued_file.0.filename;
-        println!("Dequeuing sub-file: {}", filename);
+        trace!("Dequeuing sub-file: {}", filename);
         match source_map.find_filename(filename) {
-            Some(_) => println!("Already parsed; reusing sub-file: {}", filename),
+            Some(_) => trace!("Already parsed; reusing sub-file: {}", filename),
             None => {
-                println!("Not yet parsed; parsing sub-file: {}", filename);
+                trace!("Not yet parsed; parsing sub-file: {}", filename);
                 let source_file = load_and_parse_single_file(&filename[..], resolver)?;
                 let source_file_ref = source_map.insert(source_file);
-                println!(
+                trace!(
                     "Post-loading resolving subfile refs of sub-file: {}",
                     filename
                 );
@@ -895,7 +898,7 @@ pub fn parse(
         // Re-resolve the source file that triggered this sub-file loading to update its subfile refs
         // if there is no more sub-file references enqueued.
         if num_pending_left == 0 {
-            println!(
+            trace!(
                 "Re-resolving referer file on last resolved ref: {}",
                 queued_file.0.referer.get(source_map).filename
             );
@@ -1121,21 +1124,24 @@ impl SourceMap {
                         .map(|&index| SourceFileRef { index })
                     {
                         // If already parsed, reuse
-                        println!(
+                        trace!(
                             "Updating resolved subfile ref in {} -> {}",
-                            referer_filename, subfilename
+                            referer_filename,
+                            subfilename
                         );
                         sfr_cmd.file = SubFileRef::ResolvedRef(existing_source_file);
                     } else if subfile_set.contains(&subfilename) {
-                        println!(
+                        trace!(
                             "Ignoring already-queued unresolved subfile ref in {} -> {}",
-                            referer_filename, subfilename
+                            referer_filename,
+                            subfilename
                         );
                     } else {
                         // If not, push to queue for later parsing, but only once
-                        println!(
+                        trace!(
                             "Queuing unresolved subfile ref in {} -> {}",
-                            referer_filename, subfilename
+                            referer_filename,
+                            subfilename
                         );
                         queue.push(&subfilename[..], &referer_filename[..], source_file_ref);
                         subfile_set.insert(subfilename);
@@ -2125,7 +2131,7 @@ mod tests {
         let source_file_ref = source_map.insert(s);
         let source_file = source_file_ref.get(&source_map);
         for c in source_file.iter(&source_map) {
-            println!("cmd: {:?}", c);
+            trace!("cmd: {:?}", c);
         }
 
         let cmds: Vec<_> = source_file.iter(&source_map).map(|(_, cmd)| cmd).collect();

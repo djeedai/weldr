@@ -148,7 +148,7 @@ mod tests {
     #[test]
     fn test_error() {
         match get_error() {
-            Err(e) => println!("Error: {}", e),
+            Err(e) => eprintln!("Error: {}", e),
             _ => {}
         };
     }
@@ -173,7 +173,7 @@ mod tests {
     fn test_from() {
         let resolve_error = ResolveError::new_raw("file");
         let error: Error = resolve_error.into();
-        println!("err: {}", error);
+        eprintln!("err: {}", error);
         match &error {
             Error::Resolve(resolve_error) => assert_eq!(resolve_error.filename, "file"),
             _ => panic!("Unexpected error type."),
@@ -181,7 +181,7 @@ mod tests {
 
         let parse_error = ParseError::new("file", error);
         let error: Error = parse_error.into();
-        println!("err: {}", error);
+        eprintln!("err: {}", error);
         match &error {
             Error::Parse(parse_error) => assert_eq!(parse_error.filename, "file"),
             _ => panic!("Unexpected error type."),

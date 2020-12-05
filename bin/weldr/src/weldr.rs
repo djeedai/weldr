@@ -456,11 +456,11 @@ fn main() -> Result<(), Error> {
     let mut gltf = gltf::Gltf::new(asset);
     gltf.buffers.push(buf);
     let json = serde_json::to_string_pretty(&gltf);
-    println!("json={:#?}", json.unwrap());
+    trace!("json={:#?}", json.unwrap());
 
-    //println!("args: pattern={}, path={}", args.pattern, args.path.to_str().unwrap());
+    //trace!("args: pattern={}, path={}", args.pattern, args.path.to_str().unwrap());
     let cmds = weldr::parse_raw(&b"1 16 0 0 0 1 0 0 0 1 0 sub.ldr"[..])?;
-    println!("cmds #{}", cmds.len());
+    trace!("cmds #{}", cmds.len());
     Ok(())
 }
 

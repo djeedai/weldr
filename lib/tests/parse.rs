@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 fn print_rec(source_map: &SourceMap, source_file_ref: SourceFileRef, indent: usize) {
     let source_file = source_file_ref.get(source_map);
-    println!("{}{}", " ".repeat(indent), source_file.filename);
+    eprintln!("{}{}", " ".repeat(indent), source_file.filename);
     for cmd in &source_file.cmds {
         if let Command::SubFileRef(sfr_cmd) = cmd {
             match &sfr_cmd.file {
@@ -14,7 +14,7 @@ fn print_rec(source_map: &SourceMap, source_file_ref: SourceFileRef, indent: usi
                     print_rec(source_map, *resolved_file, indent + 2);
                 }
                 SubFileRef::UnresolvedRef(filename) => {
-                    println!("Unresolved ref: {}", filename);
+                    eprintln!("Unresolved ref: {}", filename);
                 }
             }
         }

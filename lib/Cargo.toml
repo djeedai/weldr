@@ -27,3 +27,4 @@ path = "src/lib.rs"
 [dependencies]
 nom = "5.0.0"
 cgmath = "0.17.0"
+log = "0.4"
