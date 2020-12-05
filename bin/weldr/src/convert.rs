@@ -371,7 +371,7 @@ mod tests {
 
     #[test]
     fn test_invalid_input_content() {
-        let test_folder = testutils::setup_test_folder("convert");
+        let test_folder = testutils::setup_test_folder("invalid_input_content");
 
         // Create dummy input file
         let dummy_filename = test_folder.path().join("dummy.ldr");
@@ -399,14 +399,22 @@ mod tests {
 
     #[test]
     fn test_valid() {
-        let test_folder = testutils::setup_test_folder("convert");
+        let test_folder = testutils::setup_test_folder("convert_valid");
 
         // Create main file
         let mainfile = test_folder.path().join("main.ldr");
         {
             let mut f = std::fs::File::create(&mainfile).unwrap();
-            f.write(b"0 this is a comment\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 subfile.ldr")
-                .unwrap();
+            f.write_all(
+                br#"0 this is a comment
+2 16 0 0 0 1 0 0
+3 16 0 0 0 1 0 0 0 1 0
+4 16 0 0 0 1 0 0 1 1 0 0 1 0
+5 16 0 0 0 1 0 0
+1 16 0 0 0 1 0 0 0 1 0 0 0 1 subfile.ldr
+"#,
+            )
+            .unwrap();
         }
 
         // Create special include path 'extra'
@@ -417,23 +425,19 @@ mod tests {
         let subfile = extra_path.join("subfile.ldr");
         {
             let mut f = std::fs::File::create(&subfile).unwrap();
-            f.write(b"0 this is a comment").unwrap();
+            f.write_all(b"0 this is a comment").unwrap();
         }
 
         // Convert
         let mut cmd = ConvertCommand {
             format: ConvertFormat::Gltf,
             input: mainfile.clone(),
-            output: None,
+            output: Some(test_folder.path().join("main_cvt.gltf")),
             with_lines: false,
             include_paths: Some(vec![extra_path]),
             catalog_path: Some(test_folder.path()),
         };
         assert!(matches!(cmd.exec(), Ok(_)));
-
-        // Delete test files
-        std::fs::remove_file(&mainfile).unwrap_or_default();
-        std::fs::remove_file(&subfile).unwrap_or_default();
     }
 
     // struct TestWriter {}

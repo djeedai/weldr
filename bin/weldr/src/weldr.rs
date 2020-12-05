@@ -356,12 +356,12 @@ mod tests {
 
     #[test]
     fn test_disk_resolver_resolve_path() {
-        let catalog_path = testutils::setup_test_folder("disk_resolver");
-        let base_path = catalog_path.path().join("parts");
+        let test_folder = testutils::setup_test_folder("disk_resolver");
+        let base_path = test_folder.path().join("parts");
         std::fs::create_dir(&base_path).unwrap_or_default();
 
         // Create disk-based resolver
-        let resolver = DiskResolver::new_from_catalog(catalog_path.path()).unwrap();
+        let resolver = DiskResolver::new_from_catalog(test_folder.path()).unwrap();
 
         // Create a dummy file and resolve its reference filename to the on-disk filename
         let dummy_filename = base_path.join("dummy.ldr");
@@ -389,9 +389,6 @@ mod tests {
                 resolve_error: _,
             })
         ));
-
-        // Delete the test dir on success
-        std::fs::remove_dir(&base_path).unwrap_or_default();
     }
 
     #[test]
