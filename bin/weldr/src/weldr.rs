@@ -101,22 +101,25 @@ impl DiskResolver {
         DiskResolver { base_paths: vec![] }
     }
 
-    fn new_from_root<P: AsRef<Path>>(root_path: P) -> DiskResolver {
-        let root = root_path.as_ref().to_path_buf();
+    fn new_from_catalog<P: AsRef<Path>>(catalog_path: P) -> Result<DiskResolver, Error> {
+        let catalog_path = std::fs::canonicalize(catalog_path)
+            .map_err(|e| Error::NotFound(format!("catalog path not found ({})", e)))?;
         let base_paths = vec![
-            root.join("p"),
-            root.join("p").join("48"),
-            root.join("parts"),
-            root.join("parts").join("s"),
+            catalog_path.join("p"),
+            catalog_path.join("p").join("48"),
+            catalog_path.join("parts"),
+            catalog_path.join("parts").join("s"),
         ];
-        DiskResolver { base_paths }
+        Ok(DiskResolver { base_paths })
     }
 
-    fn add_path<P: AsRef<Path>>(&mut self, path: P) {
-        let path = path.as_ref();
-        if self.base_paths.iter().find(|p| *p == path).is_none() {
+    fn add_path<P: AsRef<Path>>(&mut self, path: P) -> Result<(), Error> {
+        let path = std::fs::canonicalize(path)
+            .map_err(|e| Error::NotFound(format!("include path not found ({})", e)))?;
+        if self.base_paths.iter().find(|p| *p == &path).is_none() {
             self.base_paths.push(path.to_path_buf());
         }
+        Ok(())
     }
 
     /// Resolve a relative LDraw filename reference into an actual path on disk.
@@ -496,61 +499,58 @@ mod tests {
 
     #[test]
     fn test_disk_resolver_add_path() {
+        let test_folder = testutils::setup_test_folder("disk_resolver_add_path");
+        let path1 = test_folder.path().join("path1");
+        let path2 = test_folder.path().join("path2");
+        std::fs::create_dir(&path1).unwrap();
+        std::fs::create_dir(&path2).unwrap();
         let mut resolver = DiskResolver::new();
         assert!(resolver.base_paths.is_empty());
-        resolver.add_path("path1");
+        resolver.add_path(&path1).unwrap();
         assert_eq!(1, resolver.base_paths.len());
-        assert_eq!("path1", resolver.base_paths[0].to_str().unwrap());
-        resolver.add_path("path1"); // duplicate is no-op
+        assert!(resolver.base_paths[0].to_str().unwrap().ends_with("path1"));
+        resolver.add_path(&path1).unwrap(); // duplicate is no-op
         assert_eq!(1, resolver.base_paths.len());
-        assert_eq!("path1", resolver.base_paths[0].to_str().unwrap());
-        resolver.add_path("path2");
+        assert!(resolver.base_paths[0].to_str().unwrap().ends_with("path1"));
+        resolver.add_path(&path2).unwrap();
         assert_eq!(2, resolver.base_paths.len());
-        assert_eq!("path1", resolver.base_paths[0].to_str().unwrap());
-        assert_eq!("path2", resolver.base_paths[1].to_str().unwrap());
+        assert!(resolver.base_paths[0].to_str().unwrap().ends_with("path1"));
+        assert!(resolver.base_paths[1].to_str().unwrap().ends_with("path2"));
     }
 
     #[test]
-    fn test_disk_resolver_new_from_root() {
-        let mut resolver = DiskResolver::new_from_root("root");
-        assert_eq!(4, resolver.base_paths.len());
-        assert!(resolver
-            .base_paths
-            .iter()
-            .find(|&p| { *p == Path::new("root").join("p") })
-            .is_some());
-        assert!(resolver
-            .base_paths
-            .iter()
-            .find(|&p| { *p == Path::new("root").join("p").join("48") })
-            .is_some());
-        assert!(resolver
-            .base_paths
-            .iter()
-            .find(|&p| { *p == Path::new("root").join("parts") })
-            .is_some());
-        assert!(resolver
-            .base_paths
-            .iter()
-            .find(|&p| { *p == Path::new("root").join("parts").join("s") })
-            .is_some());
-        resolver.add_path("path1");
+    fn test_disk_resolver_new_from_catalog() {
+        let test_folder = testutils::setup_test_folder("disk_resolver_new_from_catalog");
+        let paths = [
+            test_folder.path().join("p"),
+            test_folder.path().join("p").join("48"),
+            test_folder.path().join("parts"),
+            test_folder.path().join("parts").join("s"),
+            test_folder.path().join("extra"),
+        ];
+        for path in &paths {
+            std::fs::create_dir(path).unwrap();
+        }
+        let mut resolver = DiskResolver::new_from_catalog(test_folder.path()).unwrap();
+        resolver.add_path(test_folder.path().join("extra")).unwrap();
         assert_eq!(5, resolver.base_paths.len());
-        assert!(resolver
-            .base_paths
-            .iter()
-            .find(|&p| { *p == Path::new("path1") })
-            .is_some());
+        for path in &paths {
+            assert!(resolver
+                .base_paths
+                .iter()
+                .find(|&p| { p == path })
+                .is_some());
+        }
     }
 
     #[test]
     fn test_disk_resolver_resolve_path() {
-        let root_path = testutils::setup_test_folder("disk_resolver");
-        let base_path = root_path.join("parts");
+        let catalog_path = testutils::setup_test_folder("disk_resolver");
+        let base_path = catalog_path.path().join("parts");
         std::fs::create_dir(&base_path).unwrap_or_default();
 
         // Create disk-based resolver
-        let resolver = DiskResolver::new_from_root(root_path.to_str().unwrap());
+        let resolver = DiskResolver::new_from_catalog(catalog_path.path()).unwrap();
 
         // Create a dummy file and resolve its reference filename to the on-disk filename
         let dummy_filename = base_path.join("dummy.ldr");

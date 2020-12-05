@@ -73,13 +73,13 @@ impl Action for ConvertCommand {
 
         let mut resolver: DiskResolver;
         if let Some(catalog_path) = &self.catalog_path {
-            resolver = DiskResolver::new_from_root(catalog_path);
+            resolver = DiskResolver::new_from_catalog(catalog_path)?;
         } else if let Ok(cwd) = std::env::current_dir() {
             warn!(
                 "No catalog path specified; using current working directory: {}",
                 cwd.to_str().unwrap_or("(invalid path)")
             );
-            resolver = DiskResolver::new_from_root(cwd);
+            resolver = DiskResolver::new_from_catalog(cwd)?;
         } else {
             // This is quite difficult to hit (and so, to test), since getting current_dir()
             // to fail is unlikely (docs say "dir does not exist or wrong permission", but the
@@ -89,7 +89,9 @@ impl Action for ConvertCommand {
         }
         if let Some(include_paths) = &self.include_paths {
             for path in include_paths {
-                resolver.add_path(path);
+                resolver.add_path(path).map_err(|e| {
+                    Error::NotFound(format!("invalid include path '{:?}' ({})", path, e))
+                })?;
             }
         }
 
@@ -151,10 +153,10 @@ mod tests {
 
     #[test]
     fn test_invalid_input_content() {
-        let test_path = testutils::setup_test_folder("convert");
+        let test_folder = testutils::setup_test_folder("convert");
 
         // Create dummy input file
-        let dummy_filename = test_path.join("dummy.ldr");
+        let dummy_filename = test_folder.path().join("dummy.ldr");
         {
             let mut f = std::fs::File::create(&dummy_filename).unwrap();
             f.write(b"dummy content").unwrap();
@@ -179,27 +181,40 @@ mod tests {
 
     #[test]
     fn test_valid() {
-        let test_path = testutils::setup_test_folder("convert");
+        let test_folder = testutils::setup_test_folder("convert");
 
-        // Create input file
-        let filename = test_path.join("valid.ldr");
+        // Create main file
+        let mainfile = test_folder.path().join("main.ldr");
         {
-            let mut f = std::fs::File::create(&filename).unwrap();
+            let mut f = std::fs::File::create(&mainfile).unwrap();
+            f.write(b"0 this is a comment\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 subfile.ldr")
+                .unwrap();
+        }
+
+        // Create special include path 'extra'
+        let extra_path = test_folder.path().join("extra");
+        std::fs::create_dir(&extra_path).unwrap();
+
+        // Create sub-file 'extra/subfile.ldr'
+        let subfile = extra_path.join("subfile.ldr");
+        {
+            let mut f = std::fs::File::create(&subfile).unwrap();
             f.write(b"0 this is a comment").unwrap();
         }
 
         // Convert
         let mut cmd = ConvertCommand {
             format: ConvertFormat::Gltf,
-            input: filename.clone(),
+            input: mainfile.clone(),
             output: None,
             with_lines: false,
-            include_paths: None,
-            catalog_path: Some(test_path.clone()),
+            include_paths: Some(vec![extra_path]),
+            catalog_path: Some(test_folder.path()),
         };
         assert!(matches!(cmd.exec(), Ok(_)));
 
-        // Delete test file
-        std::fs::remove_file(&filename).unwrap_or_default();
+        // Delete test files
+        std::fs::remove_file(&mainfile).unwrap_or_default();
+        std::fs::remove_file(&subfile).unwrap_or_default();
     }
 }
