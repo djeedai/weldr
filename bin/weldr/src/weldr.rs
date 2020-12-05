@@ -1,11 +1,13 @@
-//! The weldr tool for LDraw format management.
-//!
+//! The weldr command-line tool for LDraw format management.
 
 #![allow(dead_code)]
 
 mod convert;
 mod error;
 mod gltf;
+
+#[cfg(test)]
+mod testutils;
 
 #[macro_use]
 extern crate log;
@@ -543,13 +545,7 @@ mod tests {
 
     #[test]
     fn test_disk_resolver_resolve_path() {
-        // Ensure test dir exists and is empty
-        let mut root_path = std::env::temp_dir();
-        root_path.push("weldr/tests/disk_resolver");
-        if root_path.is_dir() {
-            std::fs::remove_dir(&root_path).unwrap_or_default();
-        }
-        std::fs::create_dir_all(&root_path).unwrap_or_default();
+        let root_path = testutils::setup_test_folder("disk_resolver");
         let base_path = root_path.join("parts");
         std::fs::create_dir(&base_path).unwrap_or_default();
 

@@ -133,6 +133,7 @@ impl Action for ConvertCommand {
 mod tests {
 
     use super::*;
+    use crate::testutils;
     use std::io::Write;
 
     #[test]
@@ -150,17 +151,7 @@ mod tests {
 
     #[test]
     fn test_invalid_input_content() {
-        // Ensure test dir exists and is empty
-        let mut test_path = std::env::temp_dir();
-        test_path.push("weldr/tests/convert");
-        if test_path.is_dir() {
-            std::fs::remove_dir(&test_path).unwrap_or_default();
-        }
-        std::fs::create_dir_all(&test_path).unwrap_or_default();
-
-        // Change current directory to test folder, which will be the default
-        // for the catalog path since None is specified.
-        std::env::set_current_dir(&test_path).unwrap();
+        let test_path = testutils::setup_test_folder("convert");
 
         // Create dummy input file
         let dummy_filename = test_path.join("dummy.ldr");
@@ -184,5 +175,31 @@ mod tests {
 
         // Delete test file
         std::fs::remove_file(&dummy_filename).unwrap_or_default();
+    }
+
+    #[test]
+    fn test_valid() {
+        let test_path = testutils::setup_test_folder("convert");
+
+        // Create input file
+        let filename = test_path.join("valid.ldr");
+        {
+            let mut f = std::fs::File::create(&filename).unwrap();
+            f.write(b"0 this is a comment").unwrap();
+        }
+
+        // Convert
+        let mut cmd = ConvertCommand {
+            format: ConvertFormat::Gltf,
+            input: filename.clone(),
+            output: None,
+            with_lines: false,
+            include_paths: None,
+            catalog_path: Some(test_path.clone()),
+        };
+        assert!(matches!(cmd.exec(), Ok(_)));
+
+        // Delete test file
+        std::fs::remove_file(&filename).unwrap_or_default();
     }
 }
