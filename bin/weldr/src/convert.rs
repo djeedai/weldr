@@ -60,17 +60,19 @@ enum ConvertFormat {
 
 impl Action for ConvertCommand {
     fn exec(&mut self) -> Result<(), Error> {
-        if !self.input.is_file() {
-            return Err(Error::NotFound("cannot open input file".to_string()));
-        }
+        // Stringify input filename
         let input_str = self.input.to_str();
         if input_str.is_none() {
-            // That should probably never happen since is_file() succeeded, unless on
-            // a system that supports invalid UTF-8 paths (sounds unlikely).
+            // Note: this can't really be tested reliably, as on some OSes (e.g. Windows 10)
+            // PathBuf.to_str() does *not* entail UTF-8 validation and returns Some(_) instead.
             return Err(Error::InvalidUtf8(Utf8Error::new("input filename")));
         }
         let input_str = input_str.unwrap();
+        if input_str.is_empty() {
+            return Err(Error::NotFound("empty input filename".to_string()));
+        }
 
+        // Setup disk resolver
         let mut resolver: DiskResolver;
         if let Some(catalog_path) = &self.catalog_path {
             resolver = DiskResolver::new_from_catalog(catalog_path)?;
@@ -95,10 +97,12 @@ impl Action for ConvertCommand {
             }
         }
 
+        // Parse recursively
         info!("Parsing file '{}'", input_str);
         let mut source_map = weldr::SourceMap::new();
         let source_file_ref = weldr::parse(input_str, &resolver, &mut source_map)?;
 
+        // Convert the parsed data to glTF 2.0
         info!("Converting file '{}' to {} format", input_str, "gltf");
         let mut geometry_cache = GeometryCache::new();
         let source_file = source_file_ref.get(&source_map);
@@ -139,7 +143,7 @@ mod tests {
     use std::io::Write;
 
     #[test]
-    fn test_input_file_not_found() {
+    fn test_input_file_empty() {
         let mut cmd = ConvertCommand {
             format: ConvertFormat::Gltf,
             input: PathBuf::new(),
@@ -148,7 +152,30 @@ mod tests {
             include_paths: None,
             catalog_path: None,
         };
-        assert!(matches!(cmd.exec(), Err(Error::NotFound(_))));
+        let res = cmd.exec();
+        assert!(matches!(res, Err(Error::NotFound(_))));
+        if let Error::NotFound(desc) = res.unwrap_err() {
+            assert!(desc.contains("empty"));
+        }
+    }
+
+    #[test]
+    fn test_input_file_not_found() {
+        let non_existing_filename = "__doesn't exist__";
+        let mut cmd = ConvertCommand {
+            format: ConvertFormat::Gltf,
+            input: PathBuf::from(&non_existing_filename),
+            output: None,
+            with_lines: false,
+            include_paths: None,
+            catalog_path: None,
+        };
+        let res = cmd.exec();
+        eprintln!("res={:?}", res);
+        assert!(matches!(res, Err(Error::Resolve(_))));
+        if let Error::Resolve(resolve_error) = res.unwrap_err() {
+            assert_eq!(non_existing_filename, resolve_error.filename);
+        }
     }
 
     #[test]
