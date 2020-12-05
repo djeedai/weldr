@@ -1,7 +1,5 @@
 //! The weldr command-line tool for LDraw format management.
 
-#![allow(dead_code)]
-
 mod convert;
 mod error;
 mod gltf;
@@ -73,18 +71,6 @@ struct App<'a, 'b> {
 }
 
 impl App<'_, '_> {
-    #[cfg(not(tarpaulin_include))] // don't test function that exit process
-    fn print_help_and_exit(&mut self) {
-        let _ = self.cli.print_help();
-        std::process::exit(1);
-    }
-
-    #[cfg(not(tarpaulin_include))] // don't test function that exit process
-    fn print_error_and_exit(&self, msg: &str) {
-        error!("{}", msg);
-        std::process::exit(1);
-    }
-
     #[cfg(not(tarpaulin_include))] // don't test function that exit process
     fn exit(&self, code: i32) {
         std::process::exit(code);
@@ -582,14 +568,6 @@ mod tests {
         // Delete the test dir on success
         std::fs::remove_dir(&base_path).unwrap_or_default();
     }
-
-    // #[test]
-    // fn test_convert() -> Result<(), Error> {
-    //     let mut app = App {
-    //         cli: CliArgs::clap(),
-    //     };
-    //     convert(&mut app, Path::new("6143.dat").to_path_buf())
-    // }
 
     #[test]
     fn test_from_vecref() {
