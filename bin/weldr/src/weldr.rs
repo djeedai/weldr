@@ -19,8 +19,8 @@ use ordered_float::NotNan;
 use std::{
     collections::HashMap,
     fs::File,
+    io::BufReader,
     io::Read,
-    io::{BufReader, Write},
     path::{Path, PathBuf},
 };
 use structopt::StructOpt;
@@ -244,182 +244,6 @@ impl GeometryCache {
         self.add_triangle(draw_ctx, &[vertices[0], vertices[1], vertices[2]]);
         self.add_triangle(draw_ctx, &[vertices[0], vertices[2], vertices[3]]);
     }
-
-    fn write(&self, base_path: &Path) -> Result<(), Error> {
-        let json_path = base_path.with_extension("gltf");
-
-        let bin_file_path = base_path.with_extension("glbuf");
-        info!("Writing binary buffer file to {:?}", bin_file_path);
-        let mut bin_file = File::create(&bin_file_path).map_err(|e| Error::GltfWrite(e))?;
-        let (vb_size, line_ib_size, tri_ib_size) = self.write_binary_buffers(&mut bin_file)?;
-
-        let mut offset: usize = 0;
-        let vertex_buffer = GeometryBuffer {
-            size: vb_size,
-            offset,
-            stride: 12,
-            component_type: gltf::ComponentType::Float,
-            attribute_type: gltf::AttributeType::Vec3,
-        };
-        offset += vb_size;
-
-        let mut index_buffers = vec![];
-        if !self.line_indices.is_empty() {
-            index_buffers.push(GeometryBuffer {
-                size: line_ib_size,
-                offset,
-                stride: 4,
-                component_type: gltf::ComponentType::UnsignedInt,
-                attribute_type: gltf::AttributeType::Scalar,
-            });
-            offset += line_ib_size;
-        }
-        if !self.triangle_indices.is_empty() {
-            index_buffers.push(GeometryBuffer {
-                size: tri_ib_size,
-                offset,
-                stride: 4,
-                component_type: gltf::ComponentType::UnsignedInt,
-                attribute_type: gltf::AttributeType::Scalar,
-            });
-            //offset += tri_ib_size;
-        }
-
-        info!("Writing JSON file to {:?}", json_path);
-        let mut json_file = File::create(json_path).unwrap();
-        self.write_gltf(
-            &mut json_file,
-            &bin_file_path,
-            &vertex_buffer,
-            &index_buffers,
-        )
-    }
-
-    fn write_gltf<W: Write>(
-        &self,
-        w: &mut W,
-        bin_file_path: &PathBuf,
-        vertex_buffer: &GeometryBuffer,
-        index_buffers: &[GeometryBuffer],
-    ) -> Result<(), Error> {
-        let asset = gltf::Asset {
-            version: "2.0".to_string(),
-            min_version: None,
-            generator: Some("weldr".to_string()),
-            copyright: None,
-        };
-        let node = gltf::Node {
-            name: None,
-            children: vec![],
-            mesh_index: Some(0),
-        };
-        let scene = gltf::Scene {
-            name: None,
-            nodes: vec![0],
-        };
-        let mut attributes: HashMap<String, u32> = HashMap::new();
-        attributes.insert("POSITION".to_string(), 0);
-        let mesh = gltf::Mesh {
-            name: None,
-            primitives: [
-                (&self.line_indices, gltf::PrimitiveMode::Lines, 1),
-                (
-                    &self.triangle_indices,
-                    gltf::PrimitiveMode::Triangles,
-                    if self.line_indices.is_empty() { 1 } else { 2 },
-                ),
-            ]
-            .iter()
-            .filter(|(buf, _, _)| !buf.is_empty())
-            .map(|(_, mode, accessor_index)| gltf::Primitive {
-                attributes: attributes.clone(),
-                indices: *accessor_index,
-                mode: *mode,
-            })
-            .collect(),
-        };
-        let total_index_byte_size: usize = index_buffers.iter().map(|buf| buf.size).sum();
-        let total_byte_size = vertex_buffer.size + total_index_byte_size;
-        let buffers = vec![gltf::Buffer {
-            name: None,
-            byte_length: total_byte_size as u32,
-            uri: Some(bin_file_path.to_str().unwrap().to_string()),
-        }];
-        let buffer_views = vec![
-            gltf::BufferView {
-                name: Some("vertex_buffer".to_string()),
-                //target: 34962, // ARRAY_BUFFER
-                buffer_index: 0,
-                byte_length: vertex_buffer.size as u32,
-                byte_offset: 0,
-                byte_stride: Some(vertex_buffer.stride as u32),
-            },
-            gltf::BufferView {
-                name: Some("index_buffer".to_string()),
-                //target: 34963, // ELEMENT_ARRAY_BUFFER
-                buffer_index: 0,
-                byte_length: total_index_byte_size as u32,
-                byte_offset: vertex_buffer.size as u32,
-                byte_stride: Some(4), // TODO: do not hardcode
-            },
-        ];
-        let mut accessors = vec![gltf::Accessor {
-            name: Some("vertex_data".to_string()),
-            component_type: vertex_buffer.component_type,
-            count: (vertex_buffer.size / vertex_buffer.stride) as u32,
-            attribute_type: vertex_buffer.attribute_type,
-            buffer_view_index: 0,
-            byte_offset: 0,
-            normalized: false,
-        }];
-        let mut byte_offset = 0;
-        for buf in index_buffers {
-            accessors.push(gltf::Accessor {
-                name: Some("index_data".to_string()),
-                component_type: buf.component_type,
-                count: (buf.size / buf.stride) as u32,
-                attribute_type: buf.attribute_type,
-                buffer_view_index: 1,
-                byte_offset,
-                normalized: false,
-            });
-            byte_offset += buf.size as u32;
-        }
-        let gltf = gltf::Gltf {
-            asset,
-            nodes: vec![node],
-            scenes: vec![scene],
-            buffers,
-            buffer_views,
-            accessors,
-            meshes: vec![mesh],
-            scene: Some(0),
-        };
-        let json = serde_json::to_string_pretty(&gltf)?;
-        let json = json.as_bytes();
-        let buf = &json[..];
-        w.write_all(buf).map_err(|e| Error::GltfWrite(e))
-    }
-
-    fn write_binary_buffers<W: Write>(&self, w: &mut W) -> Result<(usize, usize, usize), Error> {
-        let vertices = &self.vertices[..];
-        let vertices_bytes: &[u8] = unsafe { as_u8_slice(vertices) };
-        w.write_all(vertices_bytes)
-            .map_err(|e| Error::GltfWrite(e))?;
-        let line_indices = &self.line_indices[..];
-        let line_indices_bytes: &[u8] = unsafe { as_u8_slice(line_indices) };
-        w.write_all(line_indices_bytes)
-            .map_err(|e| Error::GltfWrite(e))?;
-        let triangle_indices = &self.triangle_indices[..];
-        let triangle_indices_bytes: &[u8] = unsafe { as_u8_slice(triangle_indices) };
-        w.write_all(triangle_indices_bytes)
-            .map_err(|e| Error::GltfWrite(e))?;
-        Ok((
-            vertices_bytes.len(),
-            line_indices_bytes.len(),
-            triangle_indices_bytes.len(),
-        ))
-    }
 }
 
 /// Transform a slice of something sized into a slice of u8, for binary writing.
@@ -469,6 +293,7 @@ mod tests {
 
     use super::*;
     use log::Log;
+    use std::io::Write;
 
     #[test]
     fn test_as_u8_slice() {
@@ -531,12 +356,12 @@ mod tests {
 
     #[test]
     fn test_disk_resolver_resolve_path() {
-        let catalog_path = testutils::setup_test_folder("disk_resolver");
-        let base_path = catalog_path.path().join("parts");
+        let test_folder = testutils::setup_test_folder("disk_resolver");
+        let base_path = test_folder.path().join("parts");
         std::fs::create_dir(&base_path).unwrap_or_default();
 
         // Create disk-based resolver
-        let resolver = DiskResolver::new_from_catalog(catalog_path.path()).unwrap();
+        let resolver = DiskResolver::new_from_catalog(test_folder.path()).unwrap();
 
         // Create a dummy file and resolve its reference filename to the on-disk filename
         let dummy_filename = base_path.join("dummy.ldr");
@@ -564,9 +389,6 @@ mod tests {
                 resolve_error: _,
             })
         ));
-
-        // Delete the test dir on success
-        std::fs::remove_dir(&base_path).unwrap_or_default();
     }
 
     #[test]
@@ -693,63 +515,6 @@ mod tests {
         assert_eq!(4, geo.vertex_map.len());
         assert_eq!(0, geo.line_indices.len());
         assert_eq!(6, geo.triangle_indices.len());
-    }
-
-    struct TestWriter {}
-
-    impl std::io::Write for TestWriter {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn test_writer() {
-        let mut writer = TestWriter {};
-        assert_eq!(4, writer.write(b"test").unwrap());
-        assert!(writer.flush().is_ok());
-    }
-
-    #[test]
-    fn test_geocache_write_all() {
-        let mut geo = GeometryCache::new();
-        let draw_ctx = DrawContext {
-            transform: Mat4::from_scale(1.0),
-            color: 16,
-        };
-        geo.add_quad(
-            &draw_ctx,
-            &[
-                Vec3::new(0.0, 0.0, 0.0),
-                Vec3::new(1.0, 0.0, 0.0),
-                Vec3::new(1.0, 1.0, 0.0),
-                Vec3::new(0.0, 1.0, 0.0),
-            ],
-        );
-        let mut writer = TestWriter {};
-        assert!(geo.write_binary_buffers(&mut writer).is_ok());
-        let vertex_buffer = GeometryBuffer {
-            offset: 0,
-            size: 12,
-            stride: 12,
-            component_type: gltf::ComponentType::Float,
-            attribute_type: gltf::AttributeType::Vec3,
-        };
-        let mut index_buffers = vec![];
-        index_buffers.push(GeometryBuffer {
-            offset: 0,
-            size: 12,
-            stride: 4,
-            component_type: gltf::ComponentType::UnsignedInt,
-            attribute_type: gltf::AttributeType::Scalar,
-        });
-        assert!(geo
-            .write_gltf(&mut writer, &PathBuf::new(), &vertex_buffer, &index_buffers)
-            .is_ok());
     }
 
     #[test]
