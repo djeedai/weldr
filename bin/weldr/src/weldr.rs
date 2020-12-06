@@ -276,16 +276,6 @@ fn main() -> Result<(), Error> {
         app.exit(1);
     }
 
-    let buf = gltf::Buffer::new(32).uri("buf1.glb");
-    let asset = gltf::Asset::new("2.0").generator("weldr");
-    let mut gltf = gltf::Gltf::new(asset);
-    gltf.buffers.push(buf);
-    let json = serde_json::to_string_pretty(&gltf);
-    trace!("json={:#?}", json.unwrap());
-
-    //trace!("args: pattern={}, path={}", args.pattern, args.path.to_str().unwrap());
-    let cmds = weldr::parse_raw(&b"1 16 0 0 0 1 0 0 0 1 0 sub.ldr"[..])?;
-    trace!("cmds #{}", cmds.len());
     Ok(())
 }
 
