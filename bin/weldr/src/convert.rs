@@ -27,7 +27,7 @@ pub(crate) struct ConvertCommand {
 
     /// Output line segments in addition of surfaces (triangles/quads).
     #[structopt(long = "lines", short = "l", takes_value = false)]
-    with_lines: bool,
+    lines_enabled: bool,
 
     /// Add the given location to the list of search paths for resolving parts.
     ///
@@ -294,14 +294,14 @@ impl Action for ConvertCommand {
             debug!("  cmd: {:?}", cmd);
             match cmd {
                 Command::Line(l) => {
-                    if self.with_lines {
+                    if self.lines_enabled {
                         geometry_cache.add_line(&draw_ctx, &l.vertices)
                     }
                 }
                 Command::Triangle(t) => geometry_cache.add_triangle(&draw_ctx, &t.vertices),
                 Command::Quad(q) => geometry_cache.add_quad(&draw_ctx, &q.vertices),
                 Command::OptLine(l) => {
-                    if self.with_lines {
+                    if self.lines_enabled {
                         geometry_cache.add_line(&draw_ctx, &l.vertices)
                     }
                 }
@@ -339,7 +339,7 @@ mod tests {
             format: ConvertFormat::Gltf,
             input: PathBuf::new(),
             output: None,
-            with_lines: false,
+            lines_enabled: false,
             include_paths: None,
             catalog_path: None,
         };
