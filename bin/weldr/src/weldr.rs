@@ -68,6 +68,7 @@ trait Action {
 
 struct App<'a, 'b> {
     cli: clap::App<'a, 'b>,
+    args: CliArgs,
 }
 
 impl App<'_, '_> {
@@ -262,13 +263,13 @@ fn main() -> Result<(), Error> {
         .map(|()| log::set_max_level(log::LevelFilter::Info))
         .unwrap();
 
-    let args = CliArgs::from_args();
-    let app = App {
+    let mut app = App {
         cli: CliArgs::clap(),
+        args: CliArgs::from_args(),
     };
 
-    let res = match args.cmd {
-        Cmd::Convert(mut conv) => conv.exec(),
+    let res = match &mut app.args.cmd {
+        Cmd::Convert(conv) => conv.exec(),
     };
     if let Err(e) = res {
         error!("{}", e);
