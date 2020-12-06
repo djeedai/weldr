@@ -357,7 +357,7 @@ mod tests {
             format: ConvertFormat::Gltf,
             input: PathBuf::from(&non_existing_filename),
             output: None,
-            with_lines: false,
+            lines_enabled: false,
             include_paths: None,
             catalog_path: None,
         };
@@ -385,7 +385,7 @@ mod tests {
             format: ConvertFormat::Gltf,
             input: dummy_filename.clone(),
             output: None,
-            with_lines: false,
+            lines_enabled: false,
             include_paths: None,
             catalog_path: None,
         };
@@ -433,7 +433,7 @@ mod tests {
             format: ConvertFormat::Gltf,
             input: mainfile.clone(),
             output: Some(test_folder.path().join("main_cvt.gltf")),
-            with_lines: false,
+            lines_enabled: false,
             include_paths: Some(vec![extra_path]),
             catalog_path: Some(test_folder.path()),
         };
