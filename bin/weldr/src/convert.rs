@@ -331,7 +331,7 @@ mod tests {
     use super::*;
     use crate::testutils;
     use std::io::Write;
-    use weldr::{DrawContext, Mat4, Vec3};
+    //use weldr::{DrawContext, Mat4, Vec3};
 
     #[test]
     fn test_input_file_empty() {
