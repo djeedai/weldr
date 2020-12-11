@@ -27,6 +27,9 @@ pub enum Error {
 
     /// An error encountered when there is no LDraw catalog to resolve filenames from.
     NoLDrawCatalog,
+
+    /// Unknown destination format for the convert command.
+    UnknownConvertFormat,
 }
 
 impl fmt::Display for Error {
@@ -40,15 +43,12 @@ impl fmt::Display for Error {
                 filename,
                 resolve_error,
             }) => {
-                write!(
-                    f,
-                    "resolve error for filename '{}': {:?}",
-                    filename, resolve_error
-                )?;
+                // TODO - Better formatting of this
+                write!(f, "resolve error for filename '{}'", filename)?;
                 if let Some(e) = resolve_error {
-                    write!(f, "       {}", e)?;
+                    write!(f, "\n   > {}", e)?;
                     while let Some(e) = e.source() {
-                        write!(f, "       {}", e)?;
+                        write!(f, "\n   > {}", e)?;
                     }
                 }
                 Ok(())
@@ -62,6 +62,12 @@ impl fmt::Display for Error {
                 "No include/catalog path specified, and cannot use current directory. \
                 Use -C/--catalog-path to specify the location of the catalog."
             ),
+            Error::UnknownConvertFormat => {
+                write!(
+                    f,
+                    "Only the value 'gltf' (glTF 2.0) is currently supported."
+                )
+            }
         }
     }
 }
