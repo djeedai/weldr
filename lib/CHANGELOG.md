@@ -1,5 +1,11 @@
 # Change Log
 
+## 0.3.1
+
+### Changed
+
+- Logging is now done via the `log` crate (_e.g._ `debug!()`) instead of direct `println!()` or `eprintln!()`.
+
 ## 0.3.0
 
 ### Added
