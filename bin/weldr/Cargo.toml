@@ -1,6 +1,6 @@
 [package]
 name = "weldr-bin"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Jerome Humbert"]
 description = "A command-line tool to manipulate LDraw files (.ldr)"
 license = "MIT"
@@ -24,7 +24,7 @@ path = "src/weldr.rs"
 doc = false
 
 [dependencies]
-weldr = { version = "0.3", path = "../../lib" }
+weldr = { version = "0.3.1", path = "../../lib" }
 ansi_term = "0.12"
 clap = "2.33"
 structopt = "0.3"
