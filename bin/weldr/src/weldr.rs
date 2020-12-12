@@ -45,6 +45,7 @@ impl SimpleLogger {
         }
     }
 
+    #[cfg(not(tarpaulin_include))] // can only be called once, impossible to test all codepaths
     fn init(args: &CliArgs) {
         unsafe {
             LOGGER.log_level = if args.trace {
