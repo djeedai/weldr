@@ -28,13 +28,31 @@ use std::{
 use structopt::StructOpt;
 use weldr::{DrawContext, FileRefResolver, Mat4, ResolveError, Vec3, Vec4};
 
-#[derive(Debug)]
-struct LoggerConfig {
-    log_level: log::LevelFilter,
+#[derive(Debug, StructOpt)]
+pub(crate) struct LoggerConfig {
+    /// Enable debug logging.
+    #[structopt(
+        short = "d",
+        long = "debug",
+        takes_value = false,
+        conflicts_with("trace")
+    )]
+    debug: bool,
+
+    /// Enable trace logging (very verbose).
+    #[structopt(long = "trace", takes_value = false, conflicts_with("debug"))]
+    trace: bool,
+
+    /// Do not output colors (implies --no-emoji).
+    #[structopt(long = "no-color", takes_value = false)]
     no_color: bool,
+
+    /// Do not output emojis and other UTF-8 characters.
+    #[structopt(long = "no-emoji", takes_value = false)]
     no_emoji: bool,
 }
 
+#[derive(Debug)]
 struct SimpleLogger {
     log_level: log::LevelFilter,
     color_enabled: bool,
@@ -55,7 +73,13 @@ impl SimpleLogger {
     #[cfg(not(tarpaulin_include))] // can only be called once, impossible to test all codepaths
     fn init(config: &LoggerConfig) {
         unsafe {
-            LOGGER.log_level = config.log_level;
+            LOGGER.log_level = if config.trace {
+                log::LevelFilter::Trace
+            } else if config.debug {
+                log::LevelFilter::Debug
+            } else {
+                log::LevelFilter::Info
+            };
             // Only enable colored/emoji output on interactive terminal
             if atty::is(atty::Stream::Stderr) {
                 LOGGER.color_enabled = !config.no_color;
@@ -117,35 +141,11 @@ impl log::Log for SimpleLogger {
 #[derive(StructOpt, Debug)]
 #[structopt(name = "weldr", author = "Jerome Humbert <djeedai@gmail.com>", settings = &[clap::AppSettings::UnifiedHelpMessage])]
 pub(crate) struct CliArgs {
+    #[structopt(flatten)]
+    log_config: LoggerConfig,
+
     #[structopt(subcommand)]
     cmd: Cmd,
-
-    /// Enable debug logging.
-    #[structopt(
-        short = "d",
-        long = "debug",
-        takes_value = false,
-        conflicts_with("trace"),
-        group = "output"
-    )]
-    debug: bool,
-
-    /// Enable trace logging (very verbose).
-    #[structopt(
-        long = "trace",
-        takes_value = false,
-        conflicts_with("debug"),
-        group = "output"
-    )]
-    trace: bool,
-
-    /// Do not output colors (implies --no-emoji).
-    #[structopt(long = "no-color", takes_value = false, group = "output")]
-    no_color: bool,
-
-    /// Do not output emojis and other UTF-8 characters.
-    #[structopt(long = "no-emoji", takes_value = false, group = "output")]
-    no_emoji: bool,
 }
 
 #[derive(StructOpt, Debug)]
@@ -171,7 +171,11 @@ impl App<'_, '_> {
 
     /// Print on stderr some tip for user, e.g. when some argument is missing.
     fn tip(&self, tip: &str) {
-        let prefix = if self.args.no_emoji { "" } else { "💡 " };
+        let prefix = if self.args.log_config.no_emoji {
+            ""
+        } else {
+            "💡 "
+        };
         eprintln!("{}{}", prefix, tip);
     }
 }
@@ -370,26 +374,15 @@ fn main() -> Result<(), Error> {
     let mut args = CliArgs::from_args();
     // Disable color/emoji if terminal cannot support them
     if !is_tty() {
-        args.no_color = true;
-        args.no_emoji = true;
+        args.log_config.no_color = true;
+        args.log_config.no_emoji = true;
     }
     // TODO - do that via clap/structopt directly instead?
-    if args.no_color {
+    if args.log_config.no_color {
         // no_color implies no_emoji
-        args.no_emoji = true;
+        args.log_config.no_emoji = true;
     }
-    let log_config = LoggerConfig {
-        log_level: if args.trace {
-            log::LevelFilter::Trace
-        } else if args.debug {
-            log::LevelFilter::Debug
-        } else {
-            log::LevelFilter::Info
-        },
-        no_color: args.no_color,
-        no_emoji: args.no_emoji,
-    };
-    SimpleLogger::init(&log_config);
+    SimpleLogger::init(&args.log_config);
 
     let app = App {
         cli: CliArgs::clap(),
@@ -659,12 +652,12 @@ mod tests {
     fn test_logger() {
         // Configure logger with max level to allow all codepaths
         let config = LoggerConfig {
-            log_level: log::LevelFilter::Trace,
+            debug: true,
+            trace: true,
             no_color: false,
             no_emoji: false,
         };
         SimpleLogger::init(&config);
-
         error!("test: error");
         warn!("test: warning");
         info!("test: info");

@@ -361,7 +361,7 @@ impl Action for ConvertCommand {
 mod tests {
 
     use super::*;
-    use crate::{testutils, App, CliArgs, Cmd};
+    use crate::{testutils, App, CliArgs, Cmd, LoggerConfig};
     use std::io::Write;
     use std::str::FromStr;
     //use weldr::{DrawContext, Mat4, Vec3};
@@ -390,10 +390,12 @@ mod tests {
                 include_paths: None,
                 catalog_path: None,
             }),
-            debug: false,
-            trace: false,
-            no_color: true,
-            no_emoji: true,
+            log_config: LoggerConfig {
+                debug: false,
+                trace: false,
+                no_color: true,
+                no_emoji: true,
+            },
         };
         App {
             cli: CliArgs::clap(),
