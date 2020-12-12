@@ -378,6 +378,9 @@ mod tests {
             ConvertFormat::Gltf,
             ConvertFormat::from_str(&"gltf").unwrap()
         );
+        assert!(ConvertFormat::from_str(&"").is_err());
+        assert!(ConvertFormat::from_str(&"GLTF").is_err());
+        assert!(ConvertFormat::from_str(&"__random__").is_err());
     }
 
     fn get_test_app<'a, 'b>() -> App<'a, 'b> {
