@@ -215,5 +215,23 @@ mod tests {
         if let Error::InvalidUtf8(utf8_err) = &error {
             assert_eq!("context string", utf8_err.context);
         }
+
+        let notfound_err = Error::NotFound("not found description".to_string());
+        let error: Error = notfound_err.into();
+        eprintln!("err: {}", error);
+        assert!(matches!(&error, Error::NotFound(_)));
+        if let Error::NotFound(notfound_err) = &error {
+            assert_eq!("not found description", notfound_err);
+        }
+
+        let nocat_err = Error::NoLDrawCatalog;
+        let error: Error = nocat_err.into();
+        eprintln!("err: {}", error);
+        assert!(matches!(&error, Error::NoLDrawCatalog));
+
+        let unknfmt_err = Error::UnknownConvertFormat;
+        let error: Error = unknfmt_err.into();
+        eprintln!("err: {}", error);
+        assert!(matches!(&error, Error::UnknownConvertFormat));
     }
 }
