@@ -17,7 +17,7 @@ _Note: For the underlying Rust library used by this command-line tool, see the [
 Convert an LDraw file to a glTF 2.0 file:
 
 ```shell
-weldr convert 5-8cyli.dat gltf
+weldr convert gltf 5-8cyli.dat --output 5-8cyli.gltf
 ```
 
 ⚙ `weldr` is a frontend for a set of subcommands to manipulate LDraw files. The full help and list of available subcommands can be displayed with:
@@ -30,6 +30,12 @@ Topical help for a specific subcommand (_e.g._ "`convert`") can be displayed wit
 
 ```shell
 weldr <SUBCOMMAND> --help
+```
+
+Currently the `convert` subcommand is the only one available:
+
+```shell
+weldr convert [OPTIONS] <FORMAT> <INPUT>
 ```
 
 ## Installation
