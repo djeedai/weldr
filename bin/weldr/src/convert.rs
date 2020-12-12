@@ -50,7 +50,7 @@ pub(crate) struct ConvertCommand {
     catalog_path: Option<PathBuf>,
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, PartialEq, Eq, StructOpt)]
 #[structopt(display_order = 1)]
 enum ConvertFormat {
     #[structopt(about = "Convert to glTF 2.0")]
@@ -363,7 +363,22 @@ mod tests {
     use super::*;
     use crate::{testutils, App, CliArgs, Cmd};
     use std::io::Write;
+    use std::str::FromStr;
     //use weldr::{DrawContext, Mat4, Vec3};
+
+    #[test]
+    fn test_convfmt_display() {
+        let s = format!("{}", ConvertFormat::Gltf);
+        assert!(s.contains("glTF 2.0"));
+    }
+
+    #[test]
+    fn test_convfmt_fromstr() {
+        assert_eq!(
+            ConvertFormat::Gltf,
+            ConvertFormat::from_str(&"gltf").unwrap()
+        );
+    }
 
     fn get_test_app<'a, 'b>() -> App<'a, 'b> {
         let args = CliArgs {
