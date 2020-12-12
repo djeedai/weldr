@@ -869,7 +869,7 @@ pub fn parse(
     if let Some(existing_file) = source_map.find_filename(filename) {
         return Ok(existing_file);
     }
-    info!("Parsing file: {}", filename);
+    debug!("Processing root file '{}'", filename);
     let root_file = load_and_parse_single_file(filename, resolver)?;
     trace!(
         "Post-loading resolving subfile refs of root file: {}",
@@ -881,7 +881,7 @@ pub fn parse(
     while let Some(queued_file) = queue.pop(source_map) {
         let num_pending_left = queued_file.1;
         let filename = &queued_file.0.filename;
-        trace!("Dequeuing sub-file: {}", filename);
+        debug!("Processing sub-file: '{}'", filename);
         match source_map.find_filename(filename) {
             Some(_) => trace!("Already parsed; reusing sub-file: {}", filename),
             None => {

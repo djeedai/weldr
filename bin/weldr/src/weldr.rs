@@ -10,11 +10,13 @@ mod testutils;
 #[macro_use]
 extern crate log;
 
+extern crate atty;
+
 use convert::ConvertCommand;
 use error::Error;
 
 use ansi_term::Color::{Blue, Purple, Red, Yellow};
-use log::{Level, Metadata, Record};
+use log::{Metadata, Record};
 use ordered_float::NotNan;
 use std::{
     collections::HashMap,
@@ -26,21 +28,108 @@ use std::{
 use structopt::StructOpt;
 use weldr::{DrawContext, FileRefResolver, Mat4, ResolveError, Vec3, Vec4};
 
-struct SimpleLogger;
+#[derive(Debug, StructOpt)]
+pub(crate) struct LoggerConfig {
+    /// Enable debug logging.
+    #[structopt(
+        short = "d",
+        long = "debug",
+        takes_value = false,
+        conflicts_with("trace")
+    )]
+    debug: bool,
+
+    /// Enable trace logging (very verbose).
+    #[structopt(long = "trace", takes_value = false, conflicts_with("debug"))]
+    trace: bool,
+
+    /// Do not output colors (implies --no-emoji).
+    #[structopt(long = "no-color", takes_value = false)]
+    no_color: bool,
+
+    /// Do not output emojis and other UTF-8 characters.
+    #[structopt(long = "no-emoji", takes_value = false)]
+    no_emoji: bool,
+}
+
+#[derive(Debug)]
+struct SimpleLogger {
+    log_level: log::LevelFilter,
+    color_enabled: bool,
+    emoji_enabled: bool,
+}
+
+static mut LOGGER: SimpleLogger = SimpleLogger::new();
+
+impl SimpleLogger {
+    const fn new() -> SimpleLogger {
+        SimpleLogger {
+            log_level: log::LevelFilter::Info,
+            color_enabled: false,
+            emoji_enabled: false,
+        }
+    }
+
+    #[cfg(not(tarpaulin_include))] // can only be called once, impossible to test all codepaths
+    fn init(config: &LoggerConfig) {
+        unsafe {
+            LOGGER.log_level = if config.trace {
+                log::LevelFilter::Trace
+            } else if config.debug {
+                log::LevelFilter::Debug
+            } else {
+                log::LevelFilter::Info
+            };
+            // Only enable colored/emoji output on interactive terminal
+            if atty::is(atty::Stream::Stderr) {
+                LOGGER.color_enabled = !config.no_color;
+                LOGGER.emoji_enabled = !config.no_emoji;
+            }
+            let logger: &'static SimpleLogger = &LOGGER;
+            log::set_logger(logger)
+                .map(|()| log::set_max_level(logger.log_level))
+                .unwrap();
+        }
+    }
+
+    // This is only exposed for testing, as this is dangerous.
+    #[cfg(test)]
+    fn get_mut() -> &'static mut SimpleLogger {
+        unsafe { &mut LOGGER }
+    }
+}
 
 impl log::Log for SimpleLogger {
     fn enabled(&self, metadata: &Metadata) -> bool {
-        metadata.level() <= Level::Info
+        metadata.level() <= self.log_level
     }
 
     fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
-            let prefix = match record.level() {
-                log::Level::Error => format!("{}: ", Red.paint("error")),
-                log::Level::Warn => format!("{}: ", Yellow.paint("warning")),
-                log::Level::Info => "".to_string(),
-                log::Level::Debug => format!("{}: ", Blue.paint("debug")),
-                log::Level::Trace => format!("{}: ", Purple.paint("trace")),
+            let prefix = if self.emoji_enabled {
+                match record.level() {
+                    log::Level::Error => "❌ ".to_string(),
+                    log::Level::Warn => "⚠ ".to_string(),
+                    log::Level::Info => "".to_string(),
+                    log::Level::Debug => format!("{}: ", Blue.paint("debug")),
+                    log::Level::Trace => format!("{}: ", Purple.paint("trace")),
+                }
+            } else if self.color_enabled {
+                match record.level() {
+                    log::Level::Error => format!("{}: ", Red.paint("error")),
+                    log::Level::Warn => format!("{}: ", Yellow.paint("warning")),
+                    log::Level::Info => "".to_string(),
+                    log::Level::Debug => format!("{}: ", Blue.paint("debug")),
+                    log::Level::Trace => format!("{}: ", Purple.paint("trace")),
+                }
+            } else {
+                match record.level() {
+                    log::Level::Error => "[error] ".to_string(),
+                    log::Level::Warn => "[warn ] ".to_string(),
+                    log::Level::Info => "[info ] ".to_string(),
+                    log::Level::Debug => "[debug] ".to_string(),
+                    log::Level::Trace => "[trace] ".to_string(),
+                }
             };
             eprintln!("{}{}", prefix, record.args());
         }
@@ -49,21 +138,24 @@ impl log::Log for SimpleLogger {
     fn flush(&self) {}
 }
 
-#[derive(StructOpt)]
-#[structopt(name = "weldr", author = "Jerome Humbert <djeedai@gmail.com>")]
-struct CliArgs {
+#[derive(StructOpt, Debug)]
+#[structopt(name = "weldr", author = "Jerome Humbert <djeedai@gmail.com>", settings = &[clap::AppSettings::UnifiedHelpMessage])]
+pub(crate) struct CliArgs {
+    #[structopt(flatten)]
+    log_config: LoggerConfig,
+
     #[structopt(subcommand)]
     cmd: Cmd,
 }
 
-#[derive(StructOpt)]
+#[derive(StructOpt, Debug)]
 enum Cmd {
     Convert(ConvertCommand),
 }
 
 /// A top-level action to be performed by the executable, like e.g. 'convert'.
 trait Action {
-    fn exec(&mut self) -> Result<(), Error>;
+    fn exec(&self, app: &App) -> Result<(), Error>;
 }
 
 struct App<'a, 'b> {
@@ -75,6 +167,16 @@ impl App<'_, '_> {
     #[cfg(not(tarpaulin_include))] // don't test function that exit process
     fn exit(&self, code: i32) {
         std::process::exit(code);
+    }
+
+    /// Print on stderr some tip for user, e.g. when some argument is missing.
+    fn tip(&self, tip: &str) {
+        let prefix = if self.args.log_config.no_emoji {
+            ""
+        } else {
+            "💡 "
+        };
+        eprintln!("{}{}", prefix, tip);
     }
 }
 
@@ -255,21 +357,41 @@ unsafe fn as_u8_slice<T: Sized>(p: &[T]) -> &[u8] {
     )
 }
 
-static LOGGER: SimpleLogger = SimpleLogger {};
+#[cfg(not(target_os = "windows"))]
+fn is_tty() -> bool {
+    atty::is(atty::Stream::Stderr)
+}
+
+#[cfg(target_os = "windows")]
+fn is_tty() -> bool {
+    // On Windows (10), also check that ansi_term can output ANSI characters,
+    // otherwise it will output raw escape codes and it will look like garbage.
+    atty::is(atty::Stream::Stderr) && ansi_term::enable_ansi_support().is_ok()
+}
 
 #[cfg(not(tarpaulin_include))]
 fn main() -> Result<(), Error> {
-    log::set_logger(&LOGGER)
-        .map(|()| log::set_max_level(log::LevelFilter::Info))
-        .unwrap();
+    let mut args = CliArgs::from_args();
+    // Disable color/emoji if terminal cannot support them
+    if !is_tty() {
+        args.log_config.no_color = true;
+        args.log_config.no_emoji = true;
+    }
+    // TODO - do that via clap/structopt directly instead?
+    if args.log_config.no_color {
+        // no_color implies no_emoji
+        args.log_config.no_emoji = true;
+    }
+    SimpleLogger::init(&args.log_config);
 
-    let mut app = App {
+    let app = App {
         cli: CliArgs::clap(),
-        args: CliArgs::from_args(),
+        args,
     };
 
-    let res = match &mut app.args.cmd {
-        Cmd::Convert(conv) => conv.exec(),
+    debug!("Running command: {:?}", &app.args.cmd);
+    let res = match &app.args.cmd {
+        Cmd::Convert(conv) => conv.exec(&app),
     };
     if let Err(e) = res {
         error!("{}", e);
@@ -510,7 +632,7 @@ mod tests {
 
     #[test]
     fn test_simple_logger() {
-        let logger = SimpleLogger {};
+        let logger = SimpleLogger::new();
 
         let rec = log::RecordBuilder::new()
             .file(Some("filename"))
@@ -524,5 +646,37 @@ mod tests {
             .target("target")
             .build();
         assert!(logger.enabled(&metadata));
+    }
+
+    #[test]
+    fn test_logger() {
+        // Configure logger with max level to allow all codepaths
+        let config = LoggerConfig {
+            debug: true,
+            trace: true,
+            no_color: false,
+            no_emoji: false,
+        };
+        SimpleLogger::init(&config);
+        error!("test: error");
+        warn!("test: warning");
+        info!("test: info");
+        debug!("test: debug");
+        trace!("test: trace");
+
+        let logger = SimpleLogger::get_mut();
+        logger.emoji_enabled = false;
+        error!("test: error");
+        warn!("test: warning");
+        info!("test: info");
+        debug!("test: debug");
+        trace!("test: trace");
+
+        logger.color_enabled = false;
+        error!("test: error");
+        warn!("test: warning");
+        info!("test: info");
+        debug!("test: debug");
+        trace!("test: trace");
     }
 }

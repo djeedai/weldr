@@ -3,25 +3,26 @@
 use crate::{
     as_u8_slice,
     error::{Error, Utf8Error},
-    gltf, Action, DiskResolver, GeometryBuffer, GeometryCache,
+    gltf, Action, App, DiskResolver, GeometryBuffer, GeometryCache,
 };
 
+use ansi_term::Style;
 use std::{collections::HashMap, fs::File, io::Write, path::PathBuf};
 use structopt::StructOpt;
 use weldr::Command;
 
-#[derive(StructOpt)]
-#[structopt(name = "convert", about = "Convert LDraw file to another format")]
+#[derive(StructOpt, Debug)]
+#[structopt(name = "convert", about = "Convert LDraw file to another format", settings = &[clap::AppSettings::UnifiedHelpMessage])]
 pub(crate) struct ConvertCommand {
-    /// Target format, one of "gltf"
-    #[structopt(subcommand)]
+    /// Target format; currently only "gltf" is supported.
+    #[structopt(value_name = "FORMAT")]
     format: ConvertFormat,
 
-    /// Input LDraw file to convert
-    #[structopt(parse(from_os_str))]
+    /// Input LDraw file to convert.
+    #[structopt(parse(from_os_str), value_name = "INPUT")]
     input: PathBuf,
 
-    /// Output file, stdout if not present
+    /// Output file, stdout if not present.
     #[structopt(parse(from_os_str), long = "output", short = "o", value_name = "FILE")]
     output: Option<PathBuf>,
 
@@ -30,7 +31,6 @@ pub(crate) struct ConvertCommand {
     lines_enabled: bool,
 
     /// Add the given location to the list of search paths for resolving parts.
-    ///
     /// The location is appended to the list of search paths, in addition of the canonical paths derived
     /// from the catalog location. This option can be used multiple times to add more search paths.
     #[structopt(
@@ -44,21 +44,36 @@ pub(crate) struct ConvertCommand {
     include_paths: Option<Vec<PathBuf>>,
 
     /// Set the root location of the official LDraw catalog for resolving parts.
-    ///
-    /// This option adds the following search paths to the list of paths to resolve sub-file references from:
-    /// - <PATH>/p
-    /// - <PATH>/p/48
-    /// - <PATH>/parts
-    /// - <PATH>/parts/s
+    /// This option adds the "<PATH>/p", "<PATH>/p/48", "<PATH>/parts", and "<PATH>/parts/s" search paths
+    /// to the list of paths to resolve sub-file references from.
     #[structopt(long = "catalog-path", short = "C", value_name = "PATH")]
     catalog_path: Option<PathBuf>,
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, PartialEq, Eq, StructOpt)]
 #[structopt(display_order = 1)]
 enum ConvertFormat {
     #[structopt(about = "Convert to glTF 2.0")]
     Gltf,
+}
+
+impl std::str::FromStr for ConvertFormat {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "gltf" => Ok(ConvertFormat::Gltf),
+            _ => Err(Error::UnknownConvertFormat),
+        }
+    }
+}
+
+impl std::fmt::Display for ConvertFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self {
+            ConvertFormat::Gltf => write!(f, "glTF 2.0"),
+        }
+    }
 }
 
 impl ConvertCommand {
@@ -92,7 +107,7 @@ impl ConvertCommand {
         }
     }
 
-    fn write_gltf(&mut self, geometry_cache: &GeometryCache) -> Result<(), Error> {
+    fn write_gltf(&self, geometry_cache: &GeometryCache) -> Result<(), Error> {
         // Write binary buffers
         let vertices = &geometry_cache.vertices[..];
         let vertices_bytes: &[u8] = unsafe { as_u8_slice(vertices) };
@@ -244,7 +259,7 @@ impl ConvertCommand {
 }
 
 impl Action for ConvertCommand {
-    fn exec(&mut self) -> Result<(), Error> {
+    fn exec(&self, app: &App) -> Result<(), Error> {
         // Stringify input filename
         let input_str = self.input.to_str();
         if input_str.is_none() {
@@ -262,9 +277,17 @@ impl Action for ConvertCommand {
         if let Some(catalog_path) = &self.catalog_path {
             resolver = DiskResolver::new_from_catalog(catalog_path)?;
         } else if let Ok(cwd) = std::env::current_dir() {
-            warn!(
-                "No catalog path specified; using current working directory: {}",
+            info!(
+                "No catalog path specified; using current working directory '{}'",
                 cwd.to_str().unwrap_or("(invalid path)")
+            );
+            let arg_style = Style::new().bold();
+            app.tip(
+                &format!(
+                    "Use {}/{} to specify the location of a catalog to resolve files.",
+                    arg_style.paint("--catalog-path"),
+                    arg_style.paint("-C")
+                )[..],
             );
             resolver = DiskResolver::new_from_catalog(cwd)?;
         } else {
@@ -282,8 +305,21 @@ impl Action for ConvertCommand {
             }
         }
 
+        // Output command info
+        let output_str = if let Some(output) = &self.output {
+            output
+                .to_str()
+                .map(|s| format!(" -> '{}'", s))
+                .unwrap_or_default()
+        } else {
+            " -> (stdout)".to_string()
+        };
+        info!(
+            "Converting file '{}' to {} format{}",
+            input_str, self.format, output_str
+        );
+
         // Parse recursively
-        info!("Parsing file '{}'", input_str);
         let mut source_map = weldr::SourceMap::new();
         let source_file_ref = weldr::parse(input_str, &resolver, &mut source_map)?;
 
@@ -291,7 +327,7 @@ impl Action for ConvertCommand {
         let mut geometry_cache = GeometryCache::new();
         let source_file = source_file_ref.get(&source_map);
         for (draw_ctx, cmd) in source_file.iter(&source_map) {
-            debug!("  cmd: {:?}", cmd);
+            trace!("  cmd: {:?}", cmd);
             match cmd {
                 Command::Line(l) => {
                     if self.lines_enabled {
@@ -315,10 +351,6 @@ impl Action for ConvertCommand {
         //     trace!("idx: {:?}", i);
         // }
 
-        info!(
-            "Converting file '{}' to {:?} format",
-            input_str, self.format
-        );
         match self.format {
             ConvertFormat::Gltf => self.write_gltf(&geometry_cache),
         }
@@ -329,13 +361,55 @@ impl Action for ConvertCommand {
 mod tests {
 
     use super::*;
-    use crate::testutils;
+    use crate::{testutils, App, CliArgs, Cmd, LoggerConfig};
     use std::io::Write;
+    use std::str::FromStr;
     //use weldr::{DrawContext, Mat4, Vec3};
 
     #[test]
+    fn test_convfmt_display() {
+        let s = format!("{}", ConvertFormat::Gltf);
+        assert!(s.contains("glTF 2.0"));
+    }
+
+    #[test]
+    fn test_convfmt_fromstr() {
+        assert_eq!(
+            ConvertFormat::Gltf,
+            ConvertFormat::from_str(&"gltf").unwrap()
+        );
+        assert!(ConvertFormat::from_str(&"").is_err());
+        assert!(ConvertFormat::from_str(&"GLTF").is_err());
+        assert!(ConvertFormat::from_str(&"__random__").is_err());
+    }
+
+    fn get_test_app<'a, 'b>() -> App<'a, 'b> {
+        let args = CliArgs {
+            cmd: Cmd::Convert(ConvertCommand {
+                format: ConvertFormat::Gltf,
+                input: PathBuf::new(),
+                output: None,
+                lines_enabled: false,
+                include_paths: None,
+                catalog_path: None,
+            }),
+            log_config: LoggerConfig {
+                debug: false,
+                trace: false,
+                no_color: true,
+                no_emoji: true,
+            },
+        };
+        App {
+            cli: CliArgs::clap(),
+            args,
+        }
+    }
+
+    #[test]
     fn test_input_file_empty() {
-        let mut cmd = ConvertCommand {
+        let app = get_test_app();
+        let cmd = ConvertCommand {
             format: ConvertFormat::Gltf,
             input: PathBuf::new(),
             output: None,
@@ -343,7 +417,7 @@ mod tests {
             include_paths: None,
             catalog_path: None,
         };
-        let res = cmd.exec();
+        let res = cmd.exec(&app);
         assert!(matches!(res, Err(Error::NotFound(_))));
         if let Error::NotFound(desc) = res.unwrap_err() {
             assert!(desc.contains("empty"));
@@ -352,8 +426,9 @@ mod tests {
 
     #[test]
     fn test_input_file_not_found() {
+        let app = get_test_app();
         let non_existing_filename = "__doesn't exist__";
-        let mut cmd = ConvertCommand {
+        let cmd = ConvertCommand {
             format: ConvertFormat::Gltf,
             input: PathBuf::from(&non_existing_filename),
             output: None,
@@ -361,7 +436,7 @@ mod tests {
             include_paths: None,
             catalog_path: None,
         };
-        let res = cmd.exec();
+        let res = cmd.exec(&app);
         eprintln!("res={:?}", res);
         assert!(matches!(res, Err(Error::Resolve(_))));
         if let Error::Resolve(resolve_error) = res.unwrap_err() {
@@ -381,7 +456,8 @@ mod tests {
         }
 
         // Convert
-        let mut cmd = ConvertCommand {
+        let app = get_test_app();
+        let cmd = ConvertCommand {
             format: ConvertFormat::Gltf,
             input: dummy_filename.clone(),
             output: None,
@@ -391,7 +467,7 @@ mod tests {
         };
         // NOTE: Currently succeeds because parsing silently fails and return
         //       an empty file, instead of an error.
-        assert!(matches!(cmd.exec(), Ok(_)));
+        assert!(matches!(cmd.exec(&app), Ok(_)));
 
         // Delete test file
         std::fs::remove_file(&dummy_filename).unwrap_or_default();
@@ -429,7 +505,8 @@ mod tests {
         }
 
         // Convert
-        let mut cmd = ConvertCommand {
+        let app = get_test_app();
+        let cmd = ConvertCommand {
             format: ConvertFormat::Gltf,
             input: mainfile.clone(),
             output: Some(test_folder.path().join("main_cvt.gltf")),
@@ -437,7 +514,7 @@ mod tests {
             include_paths: Some(vec![extra_path]),
             catalog_path: Some(test_folder.path()),
         };
-        assert!(matches!(cmd.exec(), Ok(_)));
+        assert!(matches!(cmd.exec(&app), Ok(_)));
     }
 
     // struct TestWriter {}
