@@ -205,8 +205,8 @@ impl DiskResolver {
     fn add_path<P: AsRef<Path>>(&mut self, path: P) -> Result<(), Error> {
         let path = std::fs::canonicalize(path)
             .map_err(|e| Error::NotFound(format!("include path not found ({})", e)))?;
-        if self.base_paths.iter().find(|p| *p == &path).is_none() {
-            self.base_paths.push(path.to_path_buf());
+        if !self.base_paths.iter().any(|p| p == &path) {
+            self.base_paths.push(path);
         }
         Ok(())
     }
@@ -319,7 +319,7 @@ impl GeometryCache {
             Some(index) => *index,
             None => {
                 let index = self.vertices.len();
-                self.vertices.push(vec.clone());
+                self.vertices.push(vec);
                 let index = index as u32;
                 self.vertex_map.insert(vec.into(), index);
                 index
@@ -459,11 +459,7 @@ mod tests {
         resolver.add_path(test_folder.path().join("extra")).unwrap();
         assert_eq!(5, resolver.base_paths.len());
         for path in &paths {
-            assert!(resolver
-                .base_paths
-                .iter()
-                .find(|&p| { p == path })
-                .is_some());
+            assert!(resolver.base_paths.iter().any(|p| p == path));
         }
     }
 
@@ -525,9 +521,9 @@ mod tests {
             z: 2.0,
         };
         let r: VecRef = v.into();
-        assert_eq!(0.0, r.x.into_inner() as f32);
-        assert_eq!(1.0, r.y.into_inner() as f32);
-        assert_eq!(2.0, r.z.into_inner() as f32);
+        assert_eq!(0.0, r.x.into_inner());
+        assert_eq!(1.0, r.y.into_inner());
+        assert_eq!(2.0, r.z.into_inner());
     }
 
     #[test]
@@ -538,9 +534,9 @@ mod tests {
             z: 2.0,
         };
         let r: VecRef = v.into();
-        assert_eq!(0.0, r.x.into_inner() as f32);
-        assert_eq!(1.0, r.y.into_inner() as f32);
-        assert_eq!(2.0, r.z.into_inner() as f32);
+        assert_eq!(0.0, r.x.into_inner());
+        assert_eq!(1.0, r.y.into_inner());
+        assert_eq!(2.0, r.z.into_inner());
     }
 
     #[test]

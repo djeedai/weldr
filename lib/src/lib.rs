@@ -138,7 +138,7 @@ fn is_cr_or_lf(chr: u8) -> bool {
 
 // Parse any character which is not <CR> or <LF>, potentially until the end of input.
 fn take_not_cr_or_lf(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    i.split_at_position_complete(|item| is_cr_or_lf(item))
+    i.split_at_position_complete(is_cr_or_lf)
 }
 
 // Parse a single comma ',' character.
@@ -161,7 +161,7 @@ fn take_not_comma_or_eol(i: &[u8]) -> IResult<&[u8], &[u8]> {
 
 // Parse any character which is not a space, potentially until the end of input.
 fn take_not_space(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    i.split_at_position_complete(|item| is_space(item))
+    i.split_at_position_complete(is_space)
 }
 
 // Read the command ID and swallow the following space, if any.
@@ -225,7 +225,7 @@ fn from_hex(i: &[u8]) -> Result<u8, nom::error::ErrorKind> {
 }
 
 fn is_hex_digit(c: u8) -> bool {
-    (c as char).is_digit(16)
+    (c as char).is_ascii_hexdigit()
 }
 
 fn hex_primary(i: &[u8]) -> IResult<&[u8], u8> {
@@ -480,7 +480,7 @@ fn line_cmd(i: &[u8]) -> IResult<&[u8], Command> {
     Ok((
         i,
         Command::Line(LineCmd {
-            color: color,
+            color,
             vertices: [v1, v2],
         }),
     ))
@@ -499,7 +499,7 @@ fn tri_cmd(i: &[u8]) -> IResult<&[u8], Command> {
     Ok((
         i,
         Command::Triangle(TriangleCmd {
-            color: color,
+            color,
             vertices: [v1, v2, v3],
         }),
     ))
@@ -520,7 +520,7 @@ fn quad_cmd(i: &[u8]) -> IResult<&[u8], Command> {
     Ok((
         i,
         Command::Quad(QuadCmd {
-            color: color,
+            color,
             vertices: [v1, v2, v3, v4],
         }),
     ))
@@ -609,17 +609,15 @@ fn read_line(i: &[u8]) -> IResult<&[u8], Command> {
 /// ```rust
 /// use weldr::{parse_raw, Command, CommentCmd, LineCmd, Vec3};
 ///
-/// fn main() {
-///   let cmd0 = Command::Comment(CommentCmd::new("this is a comment"));
-///   let cmd1 = Command::Line(LineCmd{
-///     color: 16,
-///     vertices: [
-///       Vec3{ x: 0.0, y: 0.0, z: 0.0 },
-///       Vec3{ x: 1.0, y: 1.0, z: 1.0 }
-///     ]
-///   });
-///   assert_eq!(parse_raw(b"0 this is a comment\n2 16 0 0 0 1 1 1").unwrap(), vec![cmd0, cmd1]);
-/// }
+/// let cmd0 = Command::Comment(CommentCmd::new("this is a comment"));
+/// let cmd1 = Command::Line(LineCmd{
+///   color: 16,
+///   vertices: [
+///     Vec3{ x: 0.0, y: 0.0, z: 0.0 },
+///     Vec3{ x: 1.0, y: 1.0, z: 1.0 }
+///   ]
+/// });
+/// assert_eq!(parse_raw(b"0 this is a comment\n2 16 0 0 0 1 1 1").unwrap(), vec![cmd0, cmd1]);
 /// ```
 pub fn parse_raw(ldr_content: &[u8]) -> Result<Vec<Command>, Error> {
     parse_raw_with_filename("", ldr_content)
@@ -705,7 +703,7 @@ impl SourceFile {
             color: 16,
         };
         CommandIterator {
-            stack: vec![(&self, 0, draw_ctx)],
+            stack: vec![(self, 0, draw_ctx)],
             source_map,
         }
     }
@@ -715,7 +713,7 @@ impl SourceFile {
     /// but remains in the local source file.
     pub fn local_iter<'a>(&'a self, source_map: &'a SourceMap) -> LocalCommandIterator<'a> {
         LocalCommandIterator {
-            stack: vec![&self],
+            stack: vec![self],
             index: 0,
             source_map,
         }
@@ -781,10 +779,10 @@ impl<'a> Iterator for LocalCommandIterator<'a> {
 
 impl ResolveQueue {
     fn new() -> ResolveQueue {
-        return ResolveQueue {
+        ResolveQueue {
             queue: vec![],
             pending_count: HashMap::new(),
-        };
+        }
     }
 
     fn push(&mut self, filename: &str, referer_filename: &str, referer: SourceFileRef) {
@@ -1081,22 +1079,21 @@ impl SourceMap {
 
     /// Find a source file by its reference filename.
     fn find_filename(&self, filename: &str) -> Option<SourceFileRef> {
-        match self.filename_map.get(filename) {
-            Some(&index) => Some(SourceFileRef { index }),
-            None => None,
-        }
+        self.filename_map
+            .get(filename)
+            .map(|&index| SourceFileRef { index })
     }
 
     /// Insert a new source file into the collection.
     fn insert(&mut self, source_file: SourceFile) -> SourceFileRef {
         if let Some(&index) = self.filename_map.get(&source_file.filename) {
-            return SourceFileRef { index };
+            SourceFileRef { index }
         } else {
             let index = self.source_files.len();
             self.filename_map
                 .insert(source_file.filename.clone(), index);
             self.source_files.push(source_file);
-            return SourceFileRef { index };
+            SourceFileRef { index }
         }
     }
 
@@ -1154,6 +1151,12 @@ impl SourceMap {
 
         // Restore the filename map
         std::mem::swap(&mut filename_map, &mut self.filename_map);
+    }
+}
+
+impl Default for SourceMap {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
