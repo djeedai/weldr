@@ -69,14 +69,14 @@ extern crate log;
 
 use nom::{
     branch::alt,
-    bytes::complete::{tag, tag_no_case, take_while, take_while_m_n},
+    bytes::complete::{tag, tag_no_case, take_while, take_while1, take_while_m_n},
     character::{
         complete::{digit1, line_ending as eol},
         is_alphanumeric, is_digit,
     },
     combinator::{complete, map, map_res, opt},
     error::ErrorKind,
-    multi::{many0, separated_nonempty_list},
+    multi::{many0, separated_list1},
     number::complete::float,
     sequence::{terminated, tuple},
     IResult, InputTakeAtPosition,
@@ -103,7 +103,9 @@ pub use error::{Error, ParseError, ResolveError};
 // LDraw File Format Specification
 // https://www.ldraw.org/article/218.html
 
-// TODO: Consistent naming for input vs i
+fn nom_error(i: &[u8], kind: ErrorKind) -> nom::Err<nom::error::Error<&[u8]>> {
+    nom::Err::Error(nom::error::Error::new(i, kind))
+}
 
 // "Whitespace is defined as one or more spaces (#32), tabs (#9), or combination thereof."
 fn is_space(chr: u8) -> bool {
@@ -118,11 +120,11 @@ fn take_spaces(i: &[u8]) -> IResult<&[u8], &[u8]> {
 // (carriage return/line feed). The file is permitted (but not required) to end with a <CR><LF>.
 // It is recommended that all LDraw-compliant programs also be capable of reading files with the
 // standard Unix line termination of <LF> (line feed)."
-fn end_of_line(input: &[u8]) -> IResult<&[u8], &[u8]> {
-    if input.is_empty() {
-        Ok((input, input))
+fn end_of_line(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    if i.is_empty() {
+        Ok((i, i))
     } else {
-        eol(input)
+        eol(i)
     }
 }
 
@@ -135,30 +137,31 @@ fn is_cr_or_lf(chr: u8) -> bool {
 }
 
 // Parse any character which is not <CR> or <LF>, potentially until the end of input.
-fn take_not_cr_or_lf(input: &[u8]) -> IResult<&[u8], &[u8]> {
-    input.split_at_position_complete(|item| is_cr_or_lf(item))
+fn take_not_cr_or_lf(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    i.split_at_position_complete(|item| is_cr_or_lf(item))
 }
 
 // Parse a single comma ',' character.
-fn single_comma(input: &[u8]) -> IResult<&[u8], &[u8]> {
-    if !input.is_empty() && (input[0] == b',') {
-        Ok((&input[1..], &input[..1]))
+fn single_comma(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    if !i.is_empty() && (i[0] == b',') {
+        Ok((&i[1..], &i[..1]))
     } else {
         // To work with separated_list!(), must return an Err::Error
         // when the separator doesn't parse anymore (and therefore
         // the list ends).
-        Err(nom::Err::Error((input, nom::error::ErrorKind::Tag)))
+        Err(nom_error(i, nom::error::ErrorKind::Tag))
     }
 }
 
 // Parse any character which is not a comma ',' or <CR> or <LF>, potentially until the end of input.
-fn take_not_comma_or_eol(input: &[u8]) -> IResult<&[u8], &[u8]> {
-    input.split_at_position_complete(|item| item == b',' || is_cr_or_lf(item))
+// Invalid on empty input.
+fn take_not_comma_or_eol(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    take_while1(|item| item != b',' && !is_cr_or_lf(item))(i)
 }
 
 // Parse any character which is not a space, potentially until the end of input.
-fn take_not_space(input: &[u8]) -> IResult<&[u8], &[u8]> {
-    input.split_at_position_complete(|item| is_space(item))
+fn take_not_space(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    i.split_at_position_complete(|item| is_space(item))
 }
 
 // Read the command ID and swallow the following space, if any.
@@ -183,7 +186,7 @@ fn category(i: &[u8]) -> IResult<&[u8], Command> {
 }
 
 fn keywords_list(i: &[u8]) -> IResult<&[u8], Vec<&str>> {
-    separated_nonempty_list(single_comma, map_res(take_not_comma_or_eol, str::from_utf8))(i)
+    separated_list1(single_comma, map_res(take_not_comma_or_eol, str::from_utf8))(i)
 }
 
 fn keywords(i: &[u8]) -> IResult<&[u8], Command> {
@@ -431,9 +434,9 @@ fn is_filename_char(chr: u8) -> bool {
     is_alphanumeric(chr) || chr == b'/' || chr == b'\\' || chr == b'.' || chr == b'-'
 }
 
-fn filename_char(input: &[u8]) -> IResult<&[u8], &[u8]> {
+fn filename_char(i: &[u8]) -> IResult<&[u8], &[u8]> {
     // TODO - Split at EOL instead and accept all characters for filename?
-    input.split_at_position1_complete(|item| !is_filename_char(item), ErrorKind::AlphaNumeric)
+    i.split_at_position1_complete(|item| !is_filename_char(item), ErrorKind::AlphaNumeric)
 }
 
 fn filename(i: &[u8]) -> IResult<&[u8], &str> {
@@ -547,20 +550,20 @@ fn opt_line_cmd(i: &[u8]) -> IResult<&[u8], Command> {
 
 // Zero or more "spaces", as defined in LDraw standard.
 // Valid even on empty input.
-fn space0(input: &[u8]) -> IResult<&[u8], &[u8]> {
-    input.split_at_position_complete(|item| !is_space(item))
+fn space0(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    i.split_at_position_complete(|item| !is_space(item))
 }
 
 // One or more "spaces", as defined in LDraw standard.
 // Valid even on empty input.
-fn sp(input: &[u8]) -> IResult<&[u8], &[u8]> {
-    input.split_at_position1_complete(|item| !is_space(item), ErrorKind::Space)
+fn sp(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    i.split_at_position1_complete(|item| !is_space(item), ErrorKind::Space)
 }
 
 // Zero or more "spaces", as defined in LDraw standard.
 // Valid even on empty input.
-fn space_or_eol0(input: &[u8]) -> IResult<&[u8], &[u8]> {
-    input.split_at_position_complete(|item| !is_space(item) && !is_cr_or_lf(item))
+fn space_or_eol0(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    i.split_at_position_complete(|item| !is_space(item) && !is_cr_or_lf(item))
 }
 
 // An empty line made of optional spaces, and ending with an end-of-line sequence
@@ -589,7 +592,7 @@ fn read_line(i: &[u8]) -> IResult<&[u8], Command> {
         b"3" => tri_cmd(i),
         b"4" => quad_cmd(i),
         b"5" => opt_line_cmd(i),
-        _ => IResult::Err(nom::Err::Error((i, ErrorKind::Switch))),
+        _ => Err(nom_error(i, ErrorKind::Switch)),
     }?;
     Ok((i, cmd))
 }
@@ -1275,13 +1278,12 @@ pub trait FileRefResolver {
 #[cfg(test)]
 mod tests {
     use nom::error::ErrorKind;
-    use nom::Err;
 
     use super::*;
 
     #[test]
     fn test_color_id() {
-        assert_eq!(color_id(b""), Err(Err::Error((&b""[..], ErrorKind::Digit))));
+        assert_eq!(color_id(b""), Err(nom_error(&b""[..], ErrorKind::Digit)));
         assert_eq!(color_id(b"1"), Ok((&b""[..], 1)));
         assert_eq!(color_id(b"16 "), Ok((&b" "[..], 16)));
     }
@@ -1302,18 +1304,18 @@ mod tests {
 
     #[test]
     fn test_hex_color() {
-        assert_eq!(hex_color(b""), Err(Err::Error((&b""[..], ErrorKind::Tag))));
+        assert_eq!(hex_color(b""), Err(nom_error(&b""[..], ErrorKind::Tag)));
         assert_eq!(
             hex_color(b"#"),
-            Err(Err::Error((&b""[..], ErrorKind::TakeWhileMN)))
+            Err(nom_error(&b""[..], ErrorKind::TakeWhileMN))
         );
         assert_eq!(
             hex_color(b"#1"),
-            Err(Err::Error((&b"1"[..], ErrorKind::TakeWhileMN)))
+            Err(nom_error(&b"1"[..], ErrorKind::TakeWhileMN))
         );
         assert_eq!(
             hex_color(b"#12345Z"),
-            Err(Err::Error((&b"5Z"[..], ErrorKind::TakeWhileMN)))
+            Err(nom_error(&b"5Z"[..], ErrorKind::TakeWhileMN))
         );
         assert_eq!(
             hex_color(b"#123456"),
@@ -1379,11 +1381,11 @@ mod tests {
     fn test_material_grain_size() {
         assert_eq!(
             material_grain_size(b""),
-            Err(Err::Error((&b""[..], ErrorKind::Tag)))
+            Err(nom_error(&b""[..], ErrorKind::Tag))
         );
         assert_eq!(
             material_grain_size(b"SIZE"),
-            Err(Err::Error((&b"SIZE"[..], ErrorKind::Tag)))
+            Err(nom_error(&b"SIZE"[..], ErrorKind::Tag))
         );
         assert_eq!(
             material_grain_size(b"SIZE 1"),
@@ -1395,11 +1397,11 @@ mod tests {
         );
         assert_eq!(
             material_grain_size(b"MINSIZE"),
-            Err(Err::Error((&b""[..], ErrorKind::Space)))
+            Err(nom_error(&b""[..], ErrorKind::Space))
         );
         assert_eq!(
             material_grain_size(b"MINSIZE 0.02"),
-            Err(Err::Error((&b""[..], ErrorKind::Space)))
+            Err(nom_error(&b""[..], ErrorKind::Space))
         );
         assert_eq!(
             material_grain_size(b"MINSIZE 0.02 MAXSIZE 0.04"),
@@ -1411,11 +1413,11 @@ mod tests {
     fn test_glitter_material() {
         assert_eq!(
             glitter_material(b""),
-            Err(Err::Error((&b""[..], ErrorKind::Tag)))
+            Err(nom_error(&b""[..], ErrorKind::Tag))
         );
         assert_eq!(
             glitter_material(b"GLITTER"),
-            Err(Err::Error((&b""[..], ErrorKind::Space)))
+            Err(nom_error(&b""[..], ErrorKind::Space))
         );
         assert_eq!(
             glitter_material(b"GLITTER VALUE #123456 FRACTION 1.0 VFRACTION 0.3 SIZE 1"),
@@ -1483,11 +1485,11 @@ mod tests {
     fn test_speckle_material() {
         assert_eq!(
             speckle_material(b""),
-            Err(Err::Error((&b""[..], ErrorKind::Tag)))
+            Err(nom_error(&b""[..], ErrorKind::Tag))
         );
         assert_eq!(
             speckle_material(b"SPECKLE"),
-            Err(Err::Error((&b""[..], ErrorKind::Space)))
+            Err(nom_error(&b""[..], ErrorKind::Space))
         );
         assert_eq!(
             speckle_material(b"SPECKLE VALUE #123456 FRACTION 1.0 SIZE 1"),
@@ -1587,27 +1589,24 @@ mod tests {
     fn test_digit1_as_u8() {
         assert_eq!(
             digit1_as_u8(b""),
-            Err(Err::Error((&b""[..], ErrorKind::Digit)))
+            Err(nom_error(&b""[..], ErrorKind::Digit))
         );
         assert_eq!(digit1_as_u8(b"0"), Ok((&b""[..], 0u8)));
         assert_eq!(digit1_as_u8(b"1"), Ok((&b""[..], 1u8)));
         assert_eq!(digit1_as_u8(b"255"), Ok((&b""[..], 255u8)));
         assert_eq!(
             digit1_as_u8(b"256"),
-            Err(Err::Error((&b"256"[..], ErrorKind::MapRes)))
+            Err(nom_error(&b"256"[..], ErrorKind::MapRes))
         );
         assert_eq!(digit1_as_u8(b"32 "), Ok((&b" "[..], 32u8)));
     }
 
     #[test]
     fn test_meta_colour() {
-        assert_eq!(
-            meta_colour(b""),
-            Err(Err::Error((&b""[..], ErrorKind::Tag)))
-        );
+        assert_eq!(meta_colour(b""), Err(nom_error(&b""[..], ErrorKind::Tag)));
         assert_eq!(
             meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456"),
-            Err(Err::Error((&b""[..], ErrorKind::Space)))
+            Err(nom_error(&b""[..], ErrorKind::Space))
         );
         assert_eq!(
             meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef"),
@@ -1758,15 +1757,12 @@ mod tests {
 
     #[test]
     fn test_single_comma() {
-        assert_eq!(
-            single_comma(b""),
-            Err(Err::Error((&b""[..], ErrorKind::Tag)))
-        );
+        assert_eq!(single_comma(b""), Err(nom_error(&b""[..], ErrorKind::Tag)));
         assert_eq!(single_comma(b","), Ok((&b""[..], &b","[..])));
         assert_eq!(single_comma(b",s"), Ok((&b"s"[..], &b","[..])));
         assert_eq!(
             single_comma(b"w,s"),
-            Err(Err::Error((&b"w,s"[..], ErrorKind::Tag)))
+            Err(nom_error(&b"w,s"[..], ErrorKind::Tag))
         );
     }
 
@@ -1774,7 +1770,7 @@ mod tests {
     fn test_keywords_list() {
         assert_eq!(
             keywords_list(b""),
-            Err(Err::Error((&b""[..], ErrorKind::SeparatedList)))
+            Err(nom_error(&b""[..], ErrorKind::TakeWhile1))
         );
         assert_eq!(keywords_list(b"a"), Ok((&b""[..], vec!["a"])));
         assert_eq!(keywords_list(b"a,b,c"), Ok((&b""[..], vec!["a", "b", "c"])));
@@ -1784,7 +1780,7 @@ mod tests {
     fn test_filename_char() {
         assert_eq!(
             filename_char(b""),
-            Err(Err::Error((&b""[..], ErrorKind::AlphaNumeric)))
+            Err(nom_error(&b""[..], ErrorKind::AlphaNumeric))
         );
         assert_eq!(filename_char(b"a"), Ok((&b""[..], &b"a"[..])));
         assert_eq!(filename_char(b"a-"), Ok((&b""[..], &b"a-"[..])));
@@ -1914,11 +1910,11 @@ mod tests {
         assert_eq!(empty_line(b"   "), Ok((&b""[..], &b"   "[..])));
         assert_eq!(
             empty_line(b"  a"),
-            Err(Err::Error((&b"a"[..], ErrorKind::CrLf)))
+            Err(nom_error(&b"a"[..], ErrorKind::CrLf))
         );
         assert_eq!(
             empty_line(b"a  "),
-            Err(Err::Error((&b"a  "[..], ErrorKind::CrLf)))
+            Err(nom_error(&b"a  "[..], ErrorKind::CrLf))
         );
     }
 

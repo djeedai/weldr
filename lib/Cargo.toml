@@ -25,6 +25,6 @@ name = "weldr"
 path = "src/lib.rs"
 
 [dependencies]
-nom = "5.0.0"
+nom = "7.1.3"
 cgmath = "0.17.0"
 log = "0.4"
