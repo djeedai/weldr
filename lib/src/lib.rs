@@ -62,34 +62,28 @@
 //! *LEGO® is a registered trademark of the LEGO Group, which does not sponsor, endorse, or authorize this project.
 
 // TEMP
-#![allow(unused_imports)]
 #![allow(dead_code)]
-
-#[macro_use]
-extern crate nom;
 
 #[macro_use]
 extern crate log;
 
-extern crate cgmath;
-
 use nom::{
-    bytes::complete::{tag, take_until, take_while1, take_while_m_n},
+    branch::alt,
+    bytes::complete::{tag, tag_no_case, take_while, take_while_m_n},
     character::{
-        complete::{alphanumeric1 as alphanumeric, digit1, line_ending as eol},
-        is_alphabetic, is_alphanumeric, is_digit,
+        complete::{digit1, line_ending as eol},
+        is_alphanumeric, is_digit,
     },
-    combinator::map_res,
+    combinator::{complete, map, map_res, opt},
     error::ErrorKind,
-    multi::many0,
+    multi::{many0, separated_nonempty_list},
     number::complete::float,
     sequence::{terminated, tuple},
     IResult, InputTakeAtPosition,
 };
 use std::{
     collections::{HashMap, HashSet},
-    num::ParseIntError,
-    str::{self, from_utf8, FromStr},
+    str,
 };
 
 pub type Vec3 = cgmath::Vector3<f32>;
@@ -109,12 +103,16 @@ pub use error::{Error, ParseError, ResolveError};
 // LDraw File Format Specification
 // https://www.ldraw.org/article/218.html
 
+// TODO: Consistent naming for input vs i
+
 // "Whitespace is defined as one or more spaces (#32), tabs (#9), or combination thereof."
 fn is_space(chr: u8) -> bool {
     chr == b'\t' || chr == b' '
 }
 
-named!(take_spaces, take_while!(is_space));
+fn take_spaces(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    take_while(is_space)(i)
+}
 
 // "All lines in the file must use the standard DOS/Windows line termination of <CR><LF>
 // (carriage return/line feed). The file is permitted (but not required) to end with a <CR><LF>.
@@ -164,44 +162,39 @@ fn take_not_space(input: &[u8]) -> IResult<&[u8], &[u8]> {
 }
 
 // Read the command ID and swallow the following space, if any.
-fn read_cmd_id_str(input: &[u8]) -> IResult<&[u8], &[u8]> {
-    //terminated(take_while1(is_digit), sp)(input) //< This does not work if there's no space (e.g. 4-4cylo.dat)
-    let (ii, o) = input.split_at_position1_complete(|item| !is_digit(item), ErrorKind::Digit)?;
-    let (i, _) = space0(ii)?;
+fn read_cmd_id_str(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    //terminated(take_while1(is_digit), sp)(i) //< This does not work if there's no space (e.g. 4-4cylo.dat)
+    let (i, o) = i.split_at_position1_complete(|item| !is_digit(item), ErrorKind::Digit)?;
+    let (i, _) = space0(i)?;
     Ok((i, o))
 }
 
-named!(
-    category<Command>,
-    do_parse!(
-        tag!(b"!CATEGORY")
-            >> sp
-            >> content: take_not_cr_or_lf
-            >> (Command::Category(CategoryCmd {
-                category: std::str::from_utf8(content).unwrap().to_string()
-            }))
-    )
-);
+fn category(i: &[u8]) -> IResult<&[u8], Command> {
+    let (i, _) = tag(b"!CATEGORY")(i)?;
+    let (i, _) = sp(i)?;
+    let (i, content) = map_res(take_not_cr_or_lf, str::from_utf8)(i)?;
 
-named!(
-    keywords_list<Vec<&[u8]>>,
-    separated_nonempty_list!(single_comma, take_not_comma_or_eol)
-);
+    Ok((
+        i,
+        Command::Category(CategoryCmd {
+            category: content.to_string(),
+        }),
+    ))
+}
 
-named!(
-    keywords<Command>,
-    do_parse!(
-        tag!(b"!KEYWORDS")
-            >> sp
-            >> keywords: keywords_list
-            >> (Command::Keywords(KeywordsCmd {
-                keywords: keywords
-                    .iter()
-                    .map(|&kw| std::str::from_utf8(kw).unwrap().trim().to_string())
-                    .collect()
-            }))
-    )
-);
+fn keywords_list(i: &[u8]) -> IResult<&[u8], Vec<&str>> {
+    separated_nonempty_list(single_comma, map_res(take_not_comma_or_eol, str::from_utf8))(i)
+}
+
+fn keywords(i: &[u8]) -> IResult<&[u8], Command> {
+    let (i, (_, _, keywords)) = tuple((tag(b"!KEYWORDS"), sp, keywords_list))(i)?;
+    Ok((
+        i,
+        Command::Keywords(KeywordsCmd {
+            keywords: keywords.iter().map(|kw| kw.trim().to_string()).collect(),
+        }),
+    ))
+}
 
 /// RGB color in sRGB color space.
 #[derive(Debug, PartialEq)]
@@ -218,8 +211,8 @@ impl Color {
     }
 }
 
-fn from_hex(input: &[u8]) -> Result<u8, nom::error::ErrorKind> {
-    match std::str::from_utf8(input) {
+fn from_hex(i: &[u8]) -> Result<u8, nom::error::ErrorKind> {
+    match std::str::from_utf8(i) {
         Ok(s) => match u8::from_str_radix(s, 16) {
             Ok(val) => Ok(val),
             Err(_) => Err(ErrorKind::AlphaNumeric),
@@ -232,207 +225,206 @@ fn is_hex_digit(c: u8) -> bool {
     (c as char).is_digit(16)
 }
 
-fn hex_primary(input: &[u8]) -> IResult<&[u8], u8> {
-    map_res(take_while_m_n(2, 2, is_hex_digit), from_hex)(input)
+fn hex_primary(i: &[u8]) -> IResult<&[u8], u8> {
+    map_res(take_while_m_n(2, 2, is_hex_digit), from_hex)(i)
 }
 
-fn hex_color(input: &[u8]) -> IResult<&[u8], Color> {
-    let (input, _) = tag(b"#")(input)?;
-    let (input, (red, green, blue)) = tuple((hex_primary, hex_primary, hex_primary))(input)?;
-    Ok((input, Color { red, green, blue }))
+fn hex_color(i: &[u8]) -> IResult<&[u8], Color> {
+    let (i, _) = tag(b"#")(i)?;
+    let (i, (red, green, blue)) = tuple((hex_primary, hex_primary, hex_primary))(i)?;
+    Ok((i, Color { red, green, blue }))
 }
 
-named!(
-    digit1_as_u8<u8>,
-    map_res!(map_res!(digit1, str::from_utf8), str::parse::<u8>)
-);
+fn digit1_as_u8(i: &[u8]) -> IResult<&[u8], u8> {
+    map_res(map_res(digit1, str::from_utf8), str::parse::<u8>)(i)
+}
 
 // ALPHA part of !COLOUR
-named!(
-    colour_alpha<Option<u8>>,
-    opt!(complete!(do_parse!(
-        sp >> tag!(b"ALPHA") >> sp >> alpha: digit1_as_u8 >> (alpha)
-    )))
-);
+fn colour_alpha(i: &[u8]) -> IResult<&[u8], Option<u8>> {
+    opt(complete(|i| {
+        let (i, _) = sp(i)?;
+        let (i, _) = tag(b"ALPHA")(i)?;
+        let (i, _) = sp(i)?;
+        digit1_as_u8(i)
+    }))(i)
+}
 
 // LUMINANCE part of !COLOUR
-named!(
-    colour_luminance<Option<u8>>,
-    opt!(complete!(do_parse!(
-        sp >> tag!(b"LUMINANCE") >> sp >> luminance: digit1_as_u8 >> (luminance)
-    )))
-);
+fn colour_luminance(i: &[u8]) -> IResult<&[u8], Option<u8>> {
+    opt(complete(|i| {
+        let (i, _) = sp(i)?;
+        let (i, _) = tag(b"LUMINANCE")(i)?;
+        let (i, _) = sp(i)?;
+        digit1_as_u8(i)
+    }))(i)
+}
 
-named!(
-    material_grain_size<GrainSize>,
-    alt!(
-        do_parse!(tag!(b"SIZE") >> sp >> size: float >> (GrainSize::Size(size)))
-            | do_parse!(
-                tag!(b"MINSIZE")
-                    >> sp
-                    >> min_size: float
-                    >> sp
-                    >> tag!(b"MAXSIZE")
-                    >> sp
-                    >> max_size: float
-                    >> (GrainSize::MinMaxSize((min_size, max_size)))
-            )
-    )
-);
+fn material_grain_size(i: &[u8]) -> IResult<&[u8], GrainSize> {
+    alt((grain_size, grain_min_max_size))(i)
+}
+
+fn grain_size(i: &[u8]) -> IResult<&[u8], GrainSize> {
+    // TODO: Create tagged float helper?
+    let (i, (_, _, size)) = tuple((tag(b"SIZE"), sp, float))(i)?;
+    Ok((i, GrainSize::Size(size)))
+}
+
+fn grain_min_max_size(i: &[u8]) -> IResult<&[u8], GrainSize> {
+    let (i, (_, _, min_size)) = tuple((tag(b"MINSIZE"), sp, float))(i)?;
+    let (i, _) = sp(i)?;
+    let (i, (_, _, max_size)) = tuple((tag(b"MAXSIZE"), sp, float))(i)?;
+    Ok((i, GrainSize::MinMaxSize((min_size, max_size))))
+}
 
 // GLITTER VALUE v [ALPHA a] [LUMINANCE l] FRACTION f VFRACTION vf (SIZE s | MINSIZE min MAXSIZE max)
-named!(
-    glitter_material<ColorFinish>,
-    do_parse!(
-        tag_no_case!(b"GLITTER")
-            >> sp
-            >> tag_no_case!(b"VALUE")
-            >> sp
-            >> value: hex_color
-            >> alpha: colour_alpha
-            >> luminance: colour_luminance
-            >> sp
-            >> tag_no_case!(b"FRACTION")
-            >> sp
-            >> surface_fraction: float
-            >> sp
-            >> tag_no_case!(b"VFRACTION")
-            >> sp
-            >> volume_fraction: float
-            >> sp
-            >> grain_size: material_grain_size
-            >> (ColorFinish::Material(MaterialFinish::Glitter(GlitterMaterial {
-                value,
-                alpha,
-                luminance,
-                surface_fraction,
-                volume_fraction,
-                size: grain_size
-            })))
-    )
-);
+fn glitter_material(i: &[u8]) -> IResult<&[u8], ColorFinish> {
+    let (i, _) = tag_no_case(b"GLITTER")(i)?;
+    let (i, _) = sp(i)?;
+    let (i, _) = tag_no_case(b"VALUE")(i)?;
+    let (i, _) = sp(i)?;
+    let (i, value) = hex_color(i)?;
+    let (i, alpha) = colour_alpha(i)?;
+    let (i, luminance) = colour_luminance(i)?;
+    let (i, _) = sp(i)?;
+    let (i, _) = tag_no_case(b"FRACTION")(i)?;
+    let (i, _) = sp(i)?;
+    let (i, surface_fraction) = float(i)?;
+    let (i, _) = sp(i)?;
+    let (i, _) = tag_no_case(b"VFRACTION")(i)?;
+    let (i, _) = sp(i)?;
+    let (i, volume_fraction) = float(i)?;
+    let (i, _) = sp(i)?;
+    let (i, size) = material_grain_size(i)?;
+
+    Ok((
+        i,
+        ColorFinish::Material(MaterialFinish::Glitter(GlitterMaterial {
+            value,
+            alpha,
+            luminance,
+            surface_fraction,
+            volume_fraction,
+            size,
+        })),
+    ))
+}
 
 // SPECKLE VALUE v [ALPHA a] [LUMINANCE l] FRACTION f (SIZE s | MINSIZE min MAXSIZE max)
-named!(
-    speckle_material<ColorFinish>,
-    do_parse!(
-        tag_no_case!(b"SPECKLE")
-            >> sp
-            >> tag_no_case!(b"VALUE")
-            >> sp
-            >> value: hex_color
-            >> alpha: colour_alpha
-            >> luminance: colour_luminance
-            >> sp
-            >> tag_no_case!(b"FRACTION")
-            >> sp
-            >> surface_fraction: float
-            >> sp
-            >> grain_size: material_grain_size
-            >> (ColorFinish::Material(MaterialFinish::Speckle(SpeckleMaterial {
-                value,
-                alpha,
-                luminance,
-                surface_fraction,
-                size: grain_size
-            })))
-    )
-);
+fn speckle_material(i: &[u8]) -> IResult<&[u8], ColorFinish> {
+    let (i, _) = tag_no_case(b"SPECKLE")(i)?;
+    let (i, _) = sp(i)?;
+    let (i, _) = tag_no_case(b"VALUE")(i)?;
+    let (i, _) = sp(i)?;
+    let (i, value) = hex_color(i)?;
+    let (i, alpha) = colour_alpha(i)?;
+    let (i, luminance) = colour_luminance(i)?;
+    let (i, _) = sp(i)?;
+    let (i, _) = tag_no_case(b"FRACTION")(i)?;
+    let (i, _) = sp(i)?;
+    let (i, surface_fraction) = float(i)?;
+    let (i, _) = sp(i)?;
+    let (i, size) = material_grain_size(i)?;
+
+    Ok((
+        i,
+        ColorFinish::Material(MaterialFinish::Speckle(SpeckleMaterial {
+            value,
+            alpha,
+            luminance,
+            surface_fraction,
+            size,
+        })),
+    ))
+}
 
 // Other unrecognized MATERIAL definition
-named!(
-    other_material<ColorFinish>,
-    do_parse!(
-        raw_content: take_not_cr_or_lf
-            >> (ColorFinish::Material(MaterialFinish::Other(
-                str::from_utf8(raw_content).unwrap().trim().to_string()
-            )))
-    )
-);
+fn other_material(i: &[u8]) -> IResult<&[u8], ColorFinish> {
+    let (i, content) = map_res(take_not_cr_or_lf, str::from_utf8)(i)?;
+    let finish = content.trim().to_string();
+    Ok((i, ColorFinish::Material(MaterialFinish::Other(finish))))
+}
 
 // MATERIAL finish part of !COLOUR
-named!(
-    material_finish<ColorFinish>,
-    do_parse!(
-        tag_no_case!(b"MATERIAL")
-            >> material_finish: alt!(glitter_material | speckle_material | other_material)
-            >> (material_finish)
-    )
-);
+fn material_finish(i: &[u8]) -> IResult<&[u8], ColorFinish> {
+    let (i, _) = tag_no_case(b"MATERIAL")(i)?;
+    alt((glitter_material, speckle_material, other_material))(i)
+}
 
 // Finish part of !COLOUR
-named!(
-    color_finish<Option<ColorFinish>>,
-    opt!(complete!(do_parse!(
-        sp >> color_finish:
-            alt!(
-              tag_no_case!(b"CHROME")         => { |_| ColorFinish::Chrome } |
-              tag_no_case!(b"PEARLESCENT")    => { |_| ColorFinish::Pearlescent } |
-              tag_no_case!(b"RUBBER")         => { |_| ColorFinish::Rubber } |
-              tag_no_case!(b"MATTE_METALLIC") => { |_| ColorFinish::MatteMetallic } |
-              tag_no_case!(b"METAL")          => { |_| ColorFinish::Metal } |
-              material_finish
-            )
-            >> (color_finish)
-    )))
-);
+// TODO: Avoid having the leading space in each parser?
+fn color_finish(i: &[u8]) -> IResult<&[u8], Option<ColorFinish>> {
+    opt(complete(|i| {
+        let (i, _) = sp(i)?;
+        alt((
+            map(tag_no_case(b"CHROME"), |_| ColorFinish::Chrome),
+            map(tag_no_case(b"PEARLESCENT"), |_| ColorFinish::Pearlescent),
+            map(tag_no_case(b"RUBBER"), |_| ColorFinish::Rubber),
+            map(tag_no_case(b"MATTE_METALLIC"), |_| {
+                ColorFinish::MatteMetallic
+            }),
+            map(tag_no_case(b"METAL"), |_| ColorFinish::Metal),
+            material_finish,
+        ))(i)
+    }))(i)
+}
 
 // !COLOUR extension meta-command
-named!(
-    meta_colour<Command>,
-    do_parse!(
-        tag!(b"!COLOUR")
-            >> sp
-            >> name: take_not_space
-            >> sp
-            >> tag!(b"CODE")
-            >> sp
-            >> code: color_id
-            >> sp
-            >> tag!(b"VALUE")
-            >> sp
-            >> value: hex_color
-            >> sp
-            >> tag!(b"EDGE")
-            >> sp
-            >> edge: hex_color
-            >> alpha: colour_alpha
-            >> luminance: colour_luminance
-            >> finish: color_finish
-            >> (Command::Colour(ColourCmd {
-                name: std::str::from_utf8(name).unwrap().to_string(),
-                code,
-                value,
-                edge,
-                alpha,
-                luminance,
-                finish: finish
-            }))
-    )
-);
+fn meta_colour(i: &[u8]) -> IResult<&[u8], Command> {
+    let (i, _) = tag(b"!COLOUR")(i)?;
+    let (i, _) = sp(i)?;
+    let (i, name) = map_res(take_not_space, str::from_utf8)(i)?;
+    let (i, _) = sp(i)?;
+    let (i, _) = tag(b"CODE")(i)?;
+    let (i, _) = sp(i)?;
+    let (i, code) = color_id(i)?;
+    let (i, _) = sp(i)?;
+    let (i, _) = tag(b"VALUE")(i)?;
+    let (i, _) = sp(i)?;
+    let (i, value) = hex_color(i)?;
+    let (i, _) = sp(i)?;
+    let (i, _) = tag(b"EDGE")(i)?;
+    let (i, _) = sp(i)?;
+    let (i, edge) = hex_color(i)?;
+    let (i, alpha) = colour_alpha(i)?;
+    let (i, luminance) = colour_luminance(i)?;
+    let (i, finish) = color_finish(i)?;
 
-named!(
-    comment<Command>,
-    do_parse!(
-        content: take_not_cr_or_lf
-            >> (Command::Comment(CommentCmd::new(std::str::from_utf8(content).unwrap())))
-    )
-);
+    Ok((
+        i,
+        Command::Colour(ColourCmd {
+            name: name.to_string(),
+            code,
+            value,
+            edge,
+            alpha,
+            luminance,
+            finish,
+        }),
+    ))
+}
 
-named!(
-    meta_cmd<Command>,
-    alt!(complete!(category) | complete!(keywords) | complete!(meta_colour) | comment)
-);
+fn comment(i: &[u8]) -> IResult<&[u8], Command> {
+    let (i, comment) = map_res(take_not_cr_or_lf, str::from_utf8)(i)?;
+    Ok((i, Command::Comment(CommentCmd::new(comment))))
+}
 
-named!(
-    read_vec3<Vec3>,
-    do_parse!(x: float >> sp >> y: float >> sp >> z: float >> (Vec3 { x: x, y: y, z: z }))
-);
+fn meta_cmd(i: &[u8]) -> IResult<&[u8], Command> {
+    alt((
+        complete(category),
+        complete(keywords),
+        complete(meta_colour),
+        comment,
+    ))(i)
+}
 
-named!(
-    color_id<u32>,
-    map_res!(map_res!(digit1, str::from_utf8), str::parse::<u32>)
-);
+fn read_vec3(i: &[u8]) -> IResult<&[u8], Vec3> {
+    let (i, (x, _, y, _, z)) = tuple((float, sp, float, sp, float))(i)?;
+    Ok((i, Vec3 { x, y, z }))
+}
+
+fn color_id(i: &[u8]) -> IResult<&[u8], u32> {
+    map_res(map_res(digit1, str::from_utf8), str::parse::<u32>)(i)
+}
 
 #[inline]
 fn is_filename_char(chr: u8) -> bool {
@@ -444,107 +436,114 @@ fn filename_char(input: &[u8]) -> IResult<&[u8], &[u8]> {
     input.split_at_position1_complete(|item| !is_filename_char(item), ErrorKind::AlphaNumeric)
 }
 
-named!(filename<&str>, map_res!(filename_char, str::from_utf8));
+fn filename(i: &[u8]) -> IResult<&[u8], &str> {
+    map_res(filename_char, str::from_utf8)(i)
+}
 
-named!(
-    file_ref_cmd<Command>,
-    do_parse!(
-        color: color_id
-            >> sp
-            >> pos: read_vec3
-            >> sp
-            >> row0: read_vec3
-            >> sp
-            >> row1: read_vec3
-            >> sp
-            >> row2: read_vec3
-            >> sp
-            >> file: filename
-            >> (Command::SubFileRef(SubFileRefCmd {
-                color: color,
-                pos: pos,
-                row0: row0,
-                row1: row1,
-                row2: row2,
-                file: SubFileRef::UnresolvedRef(file.to_string())
-            }))
-    )
-);
+fn file_ref_cmd(i: &[u8]) -> IResult<&[u8], Command> {
+    let (i, color) = color_id(i)?;
+    let (i, _) = sp(i)?;
+    let (i, pos) = read_vec3(i)?;
+    let (i, _) = sp(i)?;
+    let (i, row0) = read_vec3(i)?;
+    let (i, _) = sp(i)?;
+    let (i, row1) = read_vec3(i)?;
+    let (i, _) = sp(i)?;
+    let (i, row2) = read_vec3(i)?;
+    let (i, _) = sp(i)?;
+    let (i, file) = filename(i)?;
 
-named!(
-    line_cmd<Command>,
-    do_parse!(
-        color: color_id
-            >> sp
-            >> v1: read_vec3
-            >> sp
-            >> v2: read_vec3
-            >> space0
-            >> (Command::Line(LineCmd {
-                color: color,
-                vertices: [v1, v2]
-            }))
-    )
-);
+    Ok((
+        i,
+        Command::SubFileRef(SubFileRefCmd {
+            color,
+            pos,
+            row0,
+            row1,
+            row2,
+            file: SubFileRef::UnresolvedRef(file.to_string()),
+        }),
+    ))
+}
 
-named!(
-    tri_cmd<Command>,
-    do_parse!(
-        color: color_id
-            >> sp
-            >> v1: read_vec3
-            >> sp
-            >> v2: read_vec3
-            >> sp
-            >> v3: read_vec3
-            >> space0
-            >> (Command::Triangle(TriangleCmd {
-                color: color,
-                vertices: [v1, v2, v3]
-            }))
-    )
-);
+fn line_cmd(i: &[u8]) -> IResult<&[u8], Command> {
+    let (i, color) = color_id(i)?;
+    let (i, _) = sp(i)?;
+    let (i, v1) = read_vec3(i)?;
+    let (i, _) = sp(i)?;
+    let (i, v2) = read_vec3(i)?;
+    let (i, _) = space0(i)?;
 
-named!(
-    quad_cmd<Command>,
-    do_parse!(
-        color: color_id
-            >> sp
-            >> v1: read_vec3
-            >> sp
-            >> v2: read_vec3
-            >> sp
-            >> v3: read_vec3
-            >> sp
-            >> v4: read_vec3
-            >> space0
-            >> (Command::Quad(QuadCmd {
-                color: color,
-                vertices: [v1, v2, v3, v4]
-            }))
-    )
-);
+    Ok((
+        i,
+        Command::Line(LineCmd {
+            color: color,
+            vertices: [v1, v2],
+        }),
+    ))
+}
 
-named!(
-    opt_line_cmd<Command>,
-    do_parse!(
-        color: color_id
-            >> sp
-            >> v1: read_vec3
-            >> sp
-            >> v2: read_vec3
-            >> sp
-            >> v3: read_vec3
-            >> sp
-            >> v4: read_vec3
-            >> space0
-            >> (Command::OptLine(OptLineCmd {
-                color: color,
-                vertices: [v1, v2],
-                control_points: [v3, v4]
-            }))
-    )
-);
+fn tri_cmd(i: &[u8]) -> IResult<&[u8], Command> {
+    let (i, color) = color_id(i)?;
+    let (i, _) = sp(i)?;
+    let (i, v1) = read_vec3(i)?;
+    let (i, _) = sp(i)?;
+    let (i, v2) = read_vec3(i)?;
+    let (i, _) = sp(i)?;
+    let (i, v3) = read_vec3(i)?;
+    let (i, _) = space0(i)?;
+
+    Ok((
+        i,
+        Command::Triangle(TriangleCmd {
+            color: color,
+            vertices: [v1, v2, v3],
+        }),
+    ))
+}
+
+fn quad_cmd(i: &[u8]) -> IResult<&[u8], Command> {
+    let (i, color) = color_id(i)?;
+    let (i, _) = sp(i)?;
+    let (i, v1) = read_vec3(i)?;
+    let (i, _) = sp(i)?;
+    let (i, v2) = read_vec3(i)?;
+    let (i, _) = sp(i)?;
+    let (i, v3) = read_vec3(i)?;
+    let (i, _) = sp(i)?;
+    let (i, v4) = read_vec3(i)?;
+    let (i, _) = space0(i)?;
+
+    Ok((
+        i,
+        Command::Quad(QuadCmd {
+            color: color,
+            vertices: [v1, v2, v3, v4],
+        }),
+    ))
+}
+
+fn opt_line_cmd(i: &[u8]) -> IResult<&[u8], Command> {
+    let (i, color) = color_id(i)?;
+    let (i, _) = sp(i)?;
+    let (i, v1) = read_vec3(i)?;
+    let (i, _) = sp(i)?;
+    let (i, v2) = read_vec3(i)?;
+    let (i, _) = sp(i)?;
+    let (i, v3) = read_vec3(i)?;
+    let (i, _) = sp(i)?;
+    let (i, v4) = read_vec3(i)?;
+    let (i, _) = space0(i)?;
+
+    Ok((
+        i,
+        Command::OptLine(OptLineCmd {
+            color,
+            vertices: [v1, v2],
+            control_points: [v3, v4],
+        }),
+    ))
+}
 
 // Zero or more "spaces", as defined in LDraw standard.
 // Valid even on empty input.
@@ -567,7 +566,9 @@ fn space_or_eol0(input: &[u8]) -> IResult<&[u8], &[u8]> {
 // An empty line made of optional spaces, and ending with an end-of-line sequence
 // (either <CR><LF> or <LF> alone) or the end of input.
 // Valid even on empty input.
-named!(empty_line, terminated!(space0, end_of_line));
+fn empty_line(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    terminated(space0, end_of_line)(i)
+}
 
 // "There is no line length restriction. Each command consists of optional leading
 // whitespace followed by whitespace-delimited tokens. Some commands also have trailing
@@ -578,22 +579,20 @@ named!(empty_line, terminated!(space0, end_of_line));
 //
 // "The line type of a line is the first number on the line."
 // "If the line type of the command is invalid, the line is ignored."
-named!(
-    read_line<Command>,
-    do_parse!(
-        space_or_eol0
-            >> cmd: switch!(read_cmd_id_str,
-                b"0" => call!(meta_cmd) |
-                b"1" => call!(file_ref_cmd) |
-                b"2" => call!(line_cmd) |
-                b"3" => call!(tri_cmd) |
-                b"4" => call!(quad_cmd) |
-                b"5" => call!(opt_line_cmd)
-            )
-            >> end_of_line
-            >> (cmd)
-    )
-);
+fn read_line(i: &[u8]) -> IResult<&[u8], Command> {
+    let (i, _) = space_or_eol0(i)?;
+    let (i, cmd_id) = read_cmd_id_str(i)?;
+    let (i, cmd) = match cmd_id {
+        b"0" => meta_cmd(i),
+        b"1" => file_ref_cmd(i),
+        b"2" => line_cmd(i),
+        b"3" => tri_cmd(i),
+        b"4" => quad_cmd(i),
+        b"5" => opt_line_cmd(i),
+        _ => IResult::Err(nom::Err::Error((i, ErrorKind::Switch))),
+    }?;
+    Ok((i, cmd))
+}
 
 /// Parse raw LDR content without sub-file resolution.
 ///
@@ -1275,6 +1274,8 @@ pub trait FileRefResolver {
 
 #[cfg(test)]
 mod tests {
+    use nom::error::ErrorKind;
+    use nom::Err;
 
     use super::*;
 
@@ -1378,11 +1379,11 @@ mod tests {
     fn test_material_grain_size() {
         assert_eq!(
             material_grain_size(b""),
-            Err(Err::Incomplete(Needed::Size(4)))
+            Err(Err::Error((&b""[..], ErrorKind::Tag)))
         );
         assert_eq!(
             material_grain_size(b"SIZE"),
-            Err(Err::Error((&b"SIZE"[..], ErrorKind::Alt)))
+            Err(Err::Error((&b"SIZE"[..], ErrorKind::Tag)))
         );
         assert_eq!(
             material_grain_size(b"SIZE 1"),
@@ -1394,11 +1395,11 @@ mod tests {
         );
         assert_eq!(
             material_grain_size(b"MINSIZE"),
-            Err(Err::Error((&b"MINSIZE"[..], ErrorKind::Alt)))
+            Err(Err::Error((&b""[..], ErrorKind::Space)))
         );
         assert_eq!(
             material_grain_size(b"MINSIZE 0.02"),
-            Err(Err::Error((&b"MINSIZE 0.02"[..], ErrorKind::Alt)))
+            Err(Err::Error((&b""[..], ErrorKind::Space)))
         );
         assert_eq!(
             material_grain_size(b"MINSIZE 0.02 MAXSIZE 0.04"),
@@ -1408,7 +1409,10 @@ mod tests {
 
     #[test]
     fn test_glitter_material() {
-        assert_eq!(glitter_material(b""), Err(Err::Incomplete(Needed::Size(7))));
+        assert_eq!(
+            glitter_material(b""),
+            Err(Err::Error((&b""[..], ErrorKind::Tag)))
+        );
         assert_eq!(
             glitter_material(b"GLITTER"),
             Err(Err::Error((&b""[..], ErrorKind::Space)))
@@ -1477,7 +1481,10 @@ mod tests {
 
     #[test]
     fn test_speckle_material() {
-        assert_eq!(speckle_material(b""), Err(Err::Incomplete(Needed::Size(7))));
+        assert_eq!(
+            speckle_material(b""),
+            Err(Err::Error((&b""[..], ErrorKind::Tag)))
+        );
         assert_eq!(
             speckle_material(b"SPECKLE"),
             Err(Err::Error((&b""[..], ErrorKind::Space)))
@@ -1594,7 +1601,10 @@ mod tests {
 
     #[test]
     fn test_meta_colour() {
-        assert_eq!(meta_colour(b""), Err(Err::Incomplete(Needed::Size(7))));
+        assert_eq!(
+            meta_colour(b""),
+            Err(Err::Error((&b""[..], ErrorKind::Tag)))
+        );
         assert_eq!(
             meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456"),
             Err(Err::Error((&b""[..], ErrorKind::Space)))
@@ -1746,9 +1756,6 @@ mod tests {
         assert_eq!(take_not_cr_or_lf(b"test"), Ok((&b""[..], &b"test"[..])));
     }
 
-    use nom::error::ErrorKind;
-    use nom::{Err, Needed};
-
     #[test]
     fn test_single_comma() {
         assert_eq!(
@@ -1769,11 +1776,8 @@ mod tests {
             keywords_list(b""),
             Err(Err::Error((&b""[..], ErrorKind::SeparatedList)))
         );
-        assert_eq!(keywords_list(b"a"), Ok((&b""[..], vec![&b"a"[..]])));
-        assert_eq!(
-            keywords_list(b"a,b,c"),
-            Ok((&b""[..], vec![&b"a"[..], &b"b"[..], &b"c"[..]]))
-        );
+        assert_eq!(keywords_list(b"a"), Ok((&b""[..], vec!["a"])));
+        assert_eq!(keywords_list(b"a,b,c"), Ok((&b""[..], vec!["a", "b", "c"])));
     }
 
     #[test]
