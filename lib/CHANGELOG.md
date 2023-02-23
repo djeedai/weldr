@@ -1,5 +1,9 @@
 # Change Log
 
+## 0.4.0
+
+Project relicensed to a dual license MIT or Apache 2.0. See `LICENSE-APACHE2` and `LICENSE-MIT`.
+
 ## 0.3.1
 
 ### Changed

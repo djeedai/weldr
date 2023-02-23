@@ -1,9 +1,9 @@
 [package]
 name = "weldr"
-version = "0.3.1"
+version = "0.4.0"
 authors = ["Jerome Humbert"]
 description = "A Rust library to manage LDraw files (.ldr)"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/djeedai/weldr"
 readme = "README.md"
 documentation = "https://docs.rs/weldr"
@@ -12,7 +12,8 @@ categories = ["parser-implementations"]
 edition = "2018"
 include = [
   "CHANGELOG.md",
-  "LICENSE",
+  "LICENSE-APACHE2",
+  "LICENSE-MIT",
   "README.md",
   "../.gitignore",
   "Cargo.toml",
