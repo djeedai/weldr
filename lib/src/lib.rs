@@ -844,7 +844,7 @@ fn load_and_parse_single_file(
 /// ```rust
 /// use weldr::{ FileRefResolver, parse, ResolveError, SourceMap };
 ///
-/// struct MyCustomResolver {};
+/// struct MyCustomResolver;
 ///
 /// impl FileRefResolver for MyCustomResolver {
 ///   fn resolve(&self, filename: &str) -> Result<Vec<u8>, ResolveError> {
