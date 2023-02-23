@@ -107,7 +107,7 @@ fn is_zero(value: &u32) -> bool {
 }
 
 fn is_false(value: &bool) -> bool {
-    *value == false
+    !(*value)
 }
 
 #[derive(Serialize_repr, Deserialize_repr, PartialEq, Debug, Clone, Copy)]
@@ -219,7 +219,7 @@ impl Gltf {
 
     pub fn add_scene(&mut self, scene: Scene) {
         self.scenes.push(scene);
-        if self.scene == None {
+        if self.scene.is_none() {
             self.scene = Some(0);
         }
     }

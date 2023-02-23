@@ -44,20 +44,18 @@ impl ParseError {
 
     /// Create a [`ParseError`] that stems from a [`nom`] parsing error, capturing the [`nom::error::ErrorKind`]
     /// from the underlying parser which failed.
-    pub fn new_from_nom(filename: &str, err: &nom::Err<(&[u8], nom::error::ErrorKind)>) -> Self {
+    pub fn new_from_nom(filename: &str, err: &nom::Err<nom::error::Error<&[u8]>>) -> Self {
         ParseError {
             filename: filename.to_string(),
             parse_error: match err {
                 nom::Err::Incomplete(_) => None,
-                nom::Err::Error((_, e)) => {
+                nom::Err::Error(e) => {
                     // Discard input slice due to lifetime constraint
-                    let e2: nom::Err<_> = nom::Err::Error(*e);
-                    Some(e2.into())
+                    Some(nom::Err::Error(e.code).into())
                 }
-                nom::Err::Failure((_, e)) => {
+                nom::Err::Failure(e) => {
                     // Discard input slice due to lifetime constraint
-                    let e2: nom::Err<_> = nom::Err::Failure(*e);
-                    Some(e2.into())
+                    Some(nom::Err::Error(e.code).into())
                 }
             },
         }
@@ -155,8 +153,10 @@ mod tests {
 
     #[test]
     fn test_new_from_nom() {
-        let nom_error: nom::Err<(&[u8], nom::error::ErrorKind)> =
-            nom::Err::Error((&b""[..], nom::error::ErrorKind::Alpha));
+        let nom_error = nom::Err::Error(nom::error::Error::new(
+            &b""[..],
+            nom::error::ErrorKind::Alpha,
+        ));
         let parse_error = ParseError::new_from_nom("file", &nom_error);
         assert_eq!(parse_error.filename, "file");
         assert!(parse_error.parse_error.is_some());

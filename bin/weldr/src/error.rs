@@ -157,9 +157,8 @@ mod tests {
 
     #[test]
     fn test_error() {
-        match get_error() {
-            Err(e) => eprintln!("Error: {}", e),
-            _ => {}
+        if let Err(e) = get_error() {
+            eprintln!("Error: {}", e);
         };
     }
 
@@ -191,7 +190,7 @@ mod tests {
             assert_eq!(parse_error.filename, "file");
         }
 
-        let json_error = serde_json::from_str::<Dummy>(&"{[}"[..]).unwrap_err();
+        let json_error = serde_json::from_str::<Dummy>("{[}").unwrap_err();
         let error: Error = json_error.into();
         eprintln!("err: {}", error);
         assert!(matches!(&error, Error::JsonWrite(_)));
@@ -201,7 +200,7 @@ mod tests {
 
         let io_err = std::fs::File::open("_()__doesn't exist__()_").unwrap_err();
         let gltf_error = Error::GltfWrite(io_err);
-        let error: Error = gltf_error.into();
+        let error: Error = gltf_error;
         eprintln!("err: {}", error);
         assert!(matches!(&error, Error::GltfWrite(_)));
         if let Error::GltfWrite(gltf_error) = &error {
@@ -217,7 +216,7 @@ mod tests {
         }
 
         let notfound_err = Error::NotFound("not found description".to_string());
-        let error: Error = notfound_err.into();
+        let error: Error = notfound_err;
         eprintln!("err: {}", error);
         assert!(matches!(&error, Error::NotFound(_)));
         if let Error::NotFound(notfound_err) = &error {
@@ -225,12 +224,12 @@ mod tests {
         }
 
         let nocat_err = Error::NoLDrawCatalog;
-        let error: Error = nocat_err.into();
+        let error: Error = nocat_err;
         eprintln!("err: {}", error);
         assert!(matches!(&error, Error::NoLDrawCatalog));
 
         let unknfmt_err = Error::UnknownConvertFormat;
-        let error: Error = unknfmt_err.into();
+        let error: Error = unknfmt_err;
         eprintln!("err: {}", error);
         assert!(matches!(&error, Error::UnknownConvertFormat));
     }

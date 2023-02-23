@@ -82,12 +82,12 @@ impl ConvertCommand {
             let path = output.with_extension(file_ext);
             let mut file = File::create(path).unwrap();
             for data in blobs {
-                file.write_all(data).map_err(|e| Error::GltfWrite(e))?;
+                file.write_all(data).map_err(Error::GltfWrite)?;
             }
         } else {
             let mut stdout = std::io::stdout();
             for data in blobs {
-                stdout.write_all(data).map_err(|e| Error::GltfWrite(e))?;
+                stdout.write_all(data).map_err(Error::GltfWrite)?;
             }
         }
         Ok(())
@@ -376,11 +376,11 @@ mod tests {
     fn test_convfmt_fromstr() {
         assert_eq!(
             ConvertFormat::Gltf,
-            ConvertFormat::from_str(&"gltf").unwrap()
+            ConvertFormat::from_str("gltf").unwrap()
         );
-        assert!(ConvertFormat::from_str(&"").is_err());
-        assert!(ConvertFormat::from_str(&"GLTF").is_err());
-        assert!(ConvertFormat::from_str(&"__random__").is_err());
+        assert!(ConvertFormat::from_str("").is_err());
+        assert!(ConvertFormat::from_str("GLTF").is_err());
+        assert!(ConvertFormat::from_str("__random__").is_err());
     }
 
     fn get_test_app<'a, 'b>() -> App<'a, 'b> {
@@ -500,7 +500,7 @@ mod tests {
         // Create sub-file 'extra/subfile.ldr'
         let subfile = extra_path.join("subfile.ldr");
         {
-            let mut f = std::fs::File::create(&subfile).unwrap();
+            let mut f = std::fs::File::create(subfile).unwrap();
             f.write_all(b"0 this is a comment").unwrap();
         }
 
@@ -508,7 +508,7 @@ mod tests {
         let app = get_test_app();
         let cmd = ConvertCommand {
             format: ConvertFormat::Gltf,
-            input: mainfile.clone(),
+            input: mainfile,
             output: Some(test_folder.path().join("main_cvt.gltf")),
             lines_enabled: false,
             include_paths: Some(vec![extra_path]),
