@@ -72,7 +72,7 @@ use nom::{
     bytes::complete::{tag, tag_no_case, take_while, take_while1, take_while_m_n},
     character::{
         complete::{digit1, line_ending as eol},
-        is_alphanumeric, is_digit,
+        is_digit,
     },
     combinator::{complete, map, map_res, opt},
     error::ErrorKind,
@@ -81,10 +81,7 @@ use nom::{
     sequence::{terminated, tuple},
     IResult, InputTakeAtPosition,
 };
-use std::{
-    collections::{HashMap, HashSet},
-    str,
-};
+use std::{collections::HashMap, str};
 
 pub type Vec3 = cgmath::Vector3<f32>;
 pub type Vec4 = cgmath::Vector4<f32>;
@@ -200,7 +197,7 @@ fn keywords(i: &[u8]) -> IResult<&[u8], Command> {
 }
 
 /// RGB color in sRGB color space.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Color {
     pub red: u8,
     pub green: u8,
@@ -429,18 +426,9 @@ fn color_id(i: &[u8]) -> IResult<&[u8], u32> {
     map_res(map_res(digit1, str::from_utf8), str::parse::<u32>)(i)
 }
 
-#[inline]
-fn is_filename_char(chr: u8) -> bool {
-    is_alphanumeric(chr) || chr == b'/' || chr == b'\\' || chr == b'.' || chr == b'-'
-}
-
-fn filename_char(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    // TODO - Split at EOL instead and accept all characters for filename?
-    i.split_at_position1_complete(|item| !is_filename_char(item), ErrorKind::AlphaNumeric)
-}
-
 fn filename(i: &[u8]) -> IResult<&[u8], &str> {
-    map_res(filename_char, str::from_utf8)(i)
+    // Assume leading and trailing whitespace isn't part of the filename.
+    map(map_res(take_not_cr_or_lf, str::from_utf8), |s| s.trim())(i)
 }
 
 fn file_ref_cmd(i: &[u8]) -> IResult<&[u8], Command> {
@@ -464,7 +452,7 @@ fn file_ref_cmd(i: &[u8]) -> IResult<&[u8], Command> {
             row0,
             row1,
             row2,
-            file: SubFileRef::UnresolvedRef(file.to_string()),
+            file: file.to_string(),
         }),
     ))
 }
@@ -635,14 +623,7 @@ struct QueuedFileRef {
     /// Filename of unresolved source file.
     filename: String,
     /// Referer source file which requested the resolution.
-    referer: SourceFileRef,
-}
-
-struct ResolveQueue {
-    /// Queue of pending items to resolve and load.
-    queue: Vec<QueuedFileRef>,
-    /// Number of pending items in the queue for each filename.
-    pending_count: HashMap<String, u32>,
+    referer_filename: String,
 }
 
 /// Drawing context used when iterating over all drawing commands of a file via [`SourceFile::iter()`].
@@ -732,8 +713,7 @@ impl<'a> Iterator for CommandIterator<'a> {
                 let cmd = &cmds[*index];
                 *index += 1;
                 if let Command::SubFileRef(sfr_cmd) = &cmd {
-                    if let SubFileRef::ResolvedRef(resolved_ref) = &sfr_cmd.file {
-                        let source_file_2 = resolved_ref.get(self.source_map);
+                    if let Some(source_file) = self.source_map.get(&sfr_cmd.file) {
                         let local_transform = Mat4::from_cols(
                             Vec4::new(sfr_cmd.row0.x, sfr_cmd.row1.x, sfr_cmd.row2.x, 0.0),
                             Vec4::new(sfr_cmd.row0.y, sfr_cmd.row1.y, sfr_cmd.row2.y, 0.0),
@@ -744,7 +724,7 @@ impl<'a> Iterator for CommandIterator<'a> {
                             transform: draw_ctx.transform * local_transform,
                             color: 16,
                         };
-                        self.stack.push((source_file_2, 0, draw_ctx));
+                        self.stack.push((source_file, 0, draw_ctx));
                         continue;
                     }
                 } else if let Command::Comment(_) = &cmd {
@@ -777,59 +757,19 @@ impl<'a> Iterator for LocalCommandIterator<'a> {
     }
 }
 
-impl ResolveQueue {
-    fn new() -> ResolveQueue {
-        ResolveQueue {
-            queue: vec![],
-            pending_count: HashMap::new(),
-        }
-    }
-
-    fn push(&mut self, filename: &str, referer_filename: &str, referer: SourceFileRef) {
-        if let Some(num_pending) = self.pending_count.get_mut(referer_filename) {
-            assert!(*num_pending > 0); // should not make it to the queue if already resolved
-            *num_pending += 1;
-        } else {
-            self.pending_count.insert(referer_filename.to_string(), 1);
-        }
-        self.queue.push(QueuedFileRef {
-            filename: filename.to_string(),
-            referer,
-        });
-    }
-
-    fn pop(&mut self, source_map: &SourceMap) -> Option<(QueuedFileRef, u32)> {
-        match self.queue.pop() {
-            Some(qfr) => {
-                let num_pending = self
-                    .pending_count
-                    .get_mut(&qfr.referer.get(source_map).filename)
-                    .unwrap();
-                *num_pending -= 1;
-                Some((qfr, *num_pending))
-            }
-            None => None,
-        }
-    }
-
-    fn reset(&mut self) {
-        self.queue.clear();
-        self.pending_count.clear();
-    }
-}
-
 fn load_and_parse_single_file(
     filename: &str,
     resolver: &dyn FileRefResolver,
 ) -> Result<SourceFile, Error> {
-    //match resolver.resolve(filename) {}
+    // TODO: Move parse functions to SourceFile itself?
+    // We should never have "unparsed" source files.
+    // Caching only is always keyed by filenames anyway.
     let raw_content = resolver.resolve(filename)?;
     let mut source_file = SourceFile {
         filename: filename.to_string(),
-        raw_content,
         cmds: Vec::new(),
     };
-    let cmds = parse_raw_with_filename(&source_file.filename[..], &source_file.raw_content[..])?;
+    let cmds = parse_raw_with_filename(&source_file.filename, &raw_content)?;
     source_file.cmds = cmds;
     Ok(source_file)
 }
@@ -855,8 +795,7 @@ fn load_and_parse_single_file(
 /// fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///   let resolver = MyCustomResolver{};
 ///   let mut source_map = SourceMap::new();
-///   let root_file_ref = parse("root.ldr", &resolver, &mut source_map)?;
-///   let root_file = root_file_ref.get(&source_map);
+///   let root_file = parse("root.ldr", &resolver, &mut source_map)?;
 ///   assert_eq!(root_file.filename, "root.ldr");
 ///   Ok(())
 /// }
@@ -865,52 +804,53 @@ pub fn parse(
     filename: &str,
     resolver: &dyn FileRefResolver,
     source_map: &mut SourceMap,
-) -> Result<SourceFileRef, Error> {
-    if let Some(existing_file) = source_map.find_filename(filename) {
-        return Ok(existing_file);
+) -> Result<SourceFile, Error> {
+    // TODO: Avoid clone.
+    if let Some(existing_file) = source_map.get(filename) {
+        // TODO: Caching is handled here, so the disk resolver doesn't need to cache?
+        // TODO: Is this fact documented?
+        // TODO: If we have the SourceMap, can't we just return an actual reference?
+        return Ok(existing_file.clone());
     }
+
     debug!("Processing root file '{}'", filename);
     let root_file = load_and_parse_single_file(filename, resolver)?;
     trace!(
         "Post-loading resolving subfile refs of root file: {}",
         filename
     );
-    let root_file_ref = source_map.insert(root_file);
-    let mut queue = ResolveQueue::new();
-    source_map.resolve_file_refs(root_file_ref, &mut queue);
-    while let Some(queued_file) = queue.pop(source_map) {
-        let num_pending_left = queued_file.1;
-        let filename = &queued_file.0.filename;
+
+    // Use a data structure to avoid function recursion.
+    // TODO: Is it easier to use a stack instead?
+    let mut queue = Vec::new();
+    source_map.queue_subfiles(&root_file, &mut queue);
+    source_map.insert(root_file);
+
+    while let Some(queued_file) = queue.pop() {
+        let filename = &queued_file.filename;
         debug!("Processing sub-file: '{}'", filename);
-        match source_map.find_filename(filename) {
+        match source_map.get(filename) {
             Some(_) => trace!("Already parsed; reusing sub-file: {}", filename),
             None => {
                 trace!("Not yet parsed; parsing sub-file: {}", filename);
-                let source_file = load_and_parse_single_file(&filename[..], resolver)?;
-                let source_file_ref = source_map.insert(source_file);
+                let source_file = load_and_parse_single_file(filename, resolver)?;
+                source_map.queue_subfiles(&source_file, &mut queue);
+                source_map.insert(source_file);
                 trace!(
                     "Post-loading resolving subfile refs of sub-file: {}",
                     filename
                 );
-                source_map.resolve_file_refs(source_file_ref, &mut queue);
             }
         }
-        // Re-resolve the source file that triggered this sub-file loading to update its subfile refs
-        // if there is no more sub-file references enqueued.
-        if num_pending_left == 0 {
-            trace!(
-                "Re-resolving referer file on last resolved ref: {}",
-                queued_file.0.referer.get(source_map).filename
-            );
-            source_map.resolve_file_refs(queued_file.0.referer, &mut queue);
-        }
     }
-    Ok(root_file_ref)
+
+    // TODO: Fix this.
+    Ok(source_map.get(filename).unwrap().clone())
 }
 
 /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
 /// [!CATEGORY language extension](https://www.ldraw.org/article/340.html#category).
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct CategoryCmd {
     /// Category name.
     pub category: String,
@@ -918,14 +858,14 @@ pub struct CategoryCmd {
 
 /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
 /// [!KEYWORDS language extension](https://www.ldraw.org/article/340.html#keywords).
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct KeywordsCmd {
     /// List of keywords.
     pub keywords: Vec<String>,
 }
 
 /// Finish for color definitions ([!COLOUR language extension](https://www.ldraw.org/article/299.html)).
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum ColorFinish {
     Chrome,
     Pearlescent,
@@ -937,7 +877,7 @@ pub enum ColorFinish {
 
 /// Finish for optional MATERIAL part of color definition
 /// ([!COLOUR language extension](https://www.ldraw.org/article/299.html)).
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum MaterialFinish {
     Glitter(GlitterMaterial),
     Speckle(SpeckleMaterial),
@@ -946,7 +886,7 @@ pub enum MaterialFinish {
 
 /// Grain size variants for the optional MATERIAL part of color definition
 /// ([!COLOUR language extension](https://www.ldraw.org/article/299.html)).
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum GrainSize {
     Size(f32),
     MinMaxSize((f32, f32)),
@@ -954,7 +894,7 @@ pub enum GrainSize {
 
 /// Glitter material definition of a color definition
 /// ([!COLOUR language extension](https://www.ldraw.org/article/299.html)).
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct GlitterMaterial {
     /// Primary color value of the material.
     pub value: Color,
@@ -972,7 +912,7 @@ pub struct GlitterMaterial {
 
 /// Speckle material definition of a color definition
 /// ([!COLOUR language extension](https://www.ldraw.org/article/299.html)).
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct SpeckleMaterial {
     /// Primary color value of the material.
     pub value: Color,
@@ -988,7 +928,7 @@ pub struct SpeckleMaterial {
 
 /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
 /// [!COLOUR language extension](https://www.ldraw.org/article/299.html).
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct ColourCmd {
     /// Name of the color.
     pub name: String,
@@ -1007,41 +947,10 @@ pub struct ColourCmd {
 }
 
 /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) comment.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct CommentCmd {
     /// Comment content, excluding the command identififer `0` and the optional comment marker `//`.
     pub text: String,
-}
-
-/// Single LDraw source file loaded and optionally parsed.
-#[derive(Debug, PartialEq)]
-pub struct SourceFile {
-    /// The relative filename of the file as resolved.
-    pub filename: String,
-    /// Raw UTF-8 file content (without BOM) loaded from the resolved file. Line ending can be
-    /// Unix style `\n` or Windows style `\r\n`. As a convenience, parsing handles both indifferently,
-    /// so the file can contain a mix of both, although this is not recommended.
-    pub raw_content: Vec<u8>,
-    /// LDraw commands parsed from the raw text content of the file.
-    pub cmds: Vec<Command>,
-}
-
-/// Collection of [`SourceFile`] accessible from their reference filename.
-#[derive(Debug)]
-pub struct SourceMap {
-    /// Array of source files in the collection.
-    source_files: Vec<SourceFile>,
-
-    /// Map table of source files indices into [`SourceMap::source_files`] from
-    /// their reference filename, as it appears in [`SubFileRefCmd`].
-    filename_map: HashMap<String, usize>,
-}
-
-/// Reference to a single [`SourceFile`] instance in a given [`SourceMap`].
-#[derive(Debug, Copy, Clone, Default, PartialEq, PartialOrd, Eq, Ord, Hash)]
-pub struct SourceFileRef {
-    index: usize,
-    // TODO: ref to SourceMap?
 }
 
 impl CommentCmd {
@@ -1052,105 +961,68 @@ impl CommentCmd {
     }
 }
 
-impl SourceFileRef {
-    pub fn get<'a>(&'a self, source_map: &'a SourceMap) -> &'a SourceFile {
-        source_map.get(*self)
-    }
+/// Single LDraw source file loaded and optionally parsed.
+#[derive(Debug, PartialEq, Clone)]
+pub struct SourceFile {
+    /// The relative filename of the file as resolved.
+    pub filename: String,
+    /// LDraw commands parsed from the raw text content of the file.
+    pub cmds: Vec<Command>,
+}
+
+/// Collection of [`SourceFile`] accessible from their reference filename.
+#[derive(Debug)]
+pub struct SourceMap {
+    /// Map of filenames to source files.
+    // TODO: How to handle case sensitivity like STUD.DAT vs stud.dat?
+    source_files: HashMap<String, SourceFile>,
 }
 
 impl SourceMap {
     /// Construct a new empty source map.
     pub fn new() -> SourceMap {
         SourceMap {
-            source_files: vec![],
-            filename_map: HashMap::new(),
+            source_files: HashMap::new(),
         }
     }
 
-    /// Get a reference to the source file corresponding to a [`SourceFileRef`].
-    fn get(&self, source_file_ref: SourceFileRef) -> &SourceFile {
-        &self.source_files[source_file_ref.index]
+    /// Returns a reference to the source file corresponding to `filename`.
+    pub fn get(&self, filename: &str) -> Option<&SourceFile> {
+        self.source_files.get(filename)
     }
 
-    /// Get a mutable reference to the source file corresponding to a [`SourceFileRef`].
-    fn get_mut(&mut self, source_file_ref: SourceFileRef) -> &mut SourceFile {
-        &mut self.source_files[source_file_ref.index]
+    /// Returns a mutable reference to the source file corresponding to `filename`.
+    pub fn get_mut(&mut self, filename: &str) -> Option<&mut SourceFile> {
+        self.source_files.get_mut(filename)
     }
 
-    /// Find a source file by its reference filename.
-    fn find_filename(&self, filename: &str) -> Option<SourceFileRef> {
-        self.filename_map
-            .get(filename)
-            .map(|&index| SourceFileRef { index })
+    /// Inserts a new source file into the collection.
+    pub fn insert(&mut self, source_file: SourceFile) -> Option<SourceFile> {
+        self.source_files
+            .insert(source_file.filename.clone(), source_file)
     }
 
-    /// Insert a new source file into the collection.
-    fn insert(&mut self, source_file: SourceFile) -> SourceFileRef {
-        if let Some(&index) = self.filename_map.get(&source_file.filename) {
-            SourceFileRef { index }
-        } else {
-            let index = self.source_files.len();
-            self.filename_map
-                .insert(source_file.filename.clone(), index);
-            self.source_files.push(source_file);
-            SourceFileRef { index }
-        }
-    }
-
-    /// Attempt to resolve the sub-file references of a given source file, and insert unresolved
-    /// references into the given [`ResolveQueue`].
-    fn resolve_file_refs(&mut self, source_file_ref: SourceFileRef, queue: &mut ResolveQueue) {
-        // Steal filename map to decouple its lifetime from the one of the source files vector,
-        // and allow lookup while mutably iterating over the source files and their commands
-        let mut filename_map = HashMap::new();
-        std::mem::swap(&mut filename_map, &mut self.filename_map);
-
-        // Iterate over the commands of the current file and try to enqueue all its unresolved
-        // sub-file reference commands for deferred resolution.
-        let source_file = self.get_mut(source_file_ref);
+    // TODO: How to modify this code to support mpd files?
+    // TODO: Files can be relative to the current file directory.
+    // TODO: Should the resolver take the path of the file containing the reference to support the above?
+    fn queue_subfiles(&mut self, source_file: &SourceFile, queue: &mut Vec<QueuedFileRef>) {
         let referer_filename = source_file.filename.clone();
-        let mut subfile_set = HashSet::new();
-        for cmd in &mut source_file.cmds {
+        for cmd in &source_file.cmds {
             if let Command::SubFileRef(sfr_cmd) = cmd {
-                // All subfile refs come out of parse_raw() as unresolved by definition,
-                // since parse_raw() doesn't have access to the source map nor the resolver.
-                // See if we can resolve some of them now.
-                if let SubFileRef::UnresolvedRef(subfilename) = &sfr_cmd.file {
-                    let subfilename = subfilename.clone();
-                    // Check the source map
-                    if let Some(existing_source_file) = filename_map
-                        .get(&subfilename)
-                        .map(|&index| SourceFileRef { index })
-                    {
-                        // If already parsed, reuse
-                        trace!(
-                            "Updating resolved subfile ref in {} -> {}",
-                            referer_filename,
-                            subfilename
-                        );
-                        sfr_cmd.file = SubFileRef::ResolvedRef(existing_source_file);
-                    } else if subfile_set.contains(&subfilename) {
-                        trace!(
-                            "Ignoring already-queued unresolved subfile ref in {} -> {}",
-                            referer_filename,
-                            subfilename
-                        );
-                    } else {
-                        // If not, push to queue for later parsing, but only once
-                        trace!(
-                            "Queuing unresolved subfile ref in {} -> {}",
-                            referer_filename,
-                            subfilename
-                        );
-                        queue.push(&subfilename[..], &referer_filename[..], source_file_ref);
-                        subfile_set.insert(subfilename);
-                    }
+                // Queue this file for loading if we haven't already.
+                if self.get(&sfr_cmd.file).is_none() {
+                    trace!(
+                        "Queuing unresolved subfile ref in {} -> {}",
+                        referer_filename,
+                        sfr_cmd.file
+                    );
+                    queue.push(QueuedFileRef {
+                        filename: sfr_cmd.file.clone(),
+                        referer_filename: referer_filename.clone(),
+                    });
                 }
             }
         }
-
-        // Restore the filename map
-        std::mem::swap(&mut filename_map, &mut self.filename_map);
     }
 }
 
@@ -1160,18 +1032,11 @@ impl Default for SourceMap {
     }
 }
 
-/// Reference to a sub-file from inside another file.
-#[derive(Debug, PartialEq)]
-pub enum SubFileRef {
-    /// Resolved reference pointing to the given loaded/parsed sub-file.
-    ResolvedRef(SourceFileRef),
-    /// Unresolved reference containing the raw reference filename.
-    UnresolvedRef(String),
-}
-
+// TODO: Adjust wording to make clear that this is the name of an external file.
+// TODO: Resolvers should also check the current directory of the file containing the ref?
 /// [Line Type 1](https://www.ldraw.org/article/218.html#lt1) LDraw command:
 /// Reference a sub-file from the current file.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct SubFileRefCmd {
     /// Color code of the part.
     pub color: u32,
@@ -1184,12 +1049,12 @@ pub struct SubFileRefCmd {
     /// Third row of rotation+scaling matrix part.
     pub row2: Vec3,
     /// Referenced sub-file.
-    pub file: SubFileRef,
+    pub file: String,
 }
 
 /// [Line Type 2](https://www.ldraw.org/article/218.html#lt2) LDraw command:
 /// Draw a segment between 2 vertices.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct LineCmd {
     /// Color code of the primitive.
     pub color: u32,
@@ -1199,7 +1064,7 @@ pub struct LineCmd {
 
 /// [Line Type 3](https://www.ldraw.org/article/218.html#lt3) LDraw command:
 /// Draw a triangle between 3 vertices.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct TriangleCmd {
     /// Color code of the primitive.
     pub color: u32,
@@ -1209,7 +1074,7 @@ pub struct TriangleCmd {
 
 /// [Line Type 4](https://www.ldraw.org/article/218.html#lt4) LDraw command:
 /// Draw a quad between 4 vertices.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct QuadCmd {
     /// Color code of the primitive.
     pub color: u32,
@@ -1220,7 +1085,7 @@ pub struct QuadCmd {
 
 /// [Line Type 5](https://www.ldraw.org/article/218.html#lt5) LDraw command:
 /// Draw an optional segment between two vertices, aided by 2 control points.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct OptLineCmd {
     /// Color code of the primitive.
     pub color: u32,
@@ -1231,7 +1096,7 @@ pub struct OptLineCmd {
 }
 
 /// Types of commands contained in a LDraw file.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Command {
     /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
     /// [!CATEGORY language extension](https://www.ldraw.org/article/340.html#category).
@@ -1275,6 +1140,7 @@ pub trait FileRefResolver {
     /// Unix style `\n` or Windows style `\r\n`.
     ///
     /// See [`parse()`] for usage.
+    // TODO: Make this return AsRef<[u8]> so that implementations are free to cache?
     fn resolve(&self, filename: &str) -> Result<Vec<u8>, ResolveError>;
 }
 
@@ -1780,20 +1646,6 @@ mod tests {
     }
 
     #[test]
-    fn test_filename_char() {
-        assert_eq!(
-            filename_char(b""),
-            Err(nom_error(&b""[..], ErrorKind::AlphaNumeric))
-        );
-        assert_eq!(filename_char(b"a"), Ok((&b""[..], &b"a"[..])));
-        assert_eq!(filename_char(b"a-"), Ok((&b""[..], &b"a-"[..])));
-        assert_eq!(
-            filename_char(b"a/sad.bak\\ww.dat"),
-            Ok((&b""[..], &b"a/sad.bak\\ww.dat"[..]))
-        );
-    }
-
-    #[test]
     fn test_filename() {
         assert_eq!(filename(b"asd\\kw/l.ldr"), Ok((&b""[..], "asd\\kw/l.ldr")));
         assert_eq!(filename(b"asdkwl.ldr"), Ok((&b""[..], "asdkwl.ldr")));
@@ -1808,6 +1660,10 @@ mod tests {
         );
         assert_eq!(
             filename(b"asdkwl.ldr\r\n"),
+            Ok((&b"\r\n"[..], "asdkwl.ldr"))
+        );
+        assert_eq!(
+            filename(b"  asdkwl.ldr   \r\n"),
             Ok((&b"\r\n"[..], "asdkwl.ldr"))
         );
     }
@@ -1857,7 +1713,7 @@ mod tests {
             row0: Vec3::new(1.0, 0.0, 0.0),
             row1: Vec3::new(0.0, 1.0, 0.0),
             row2: Vec3::new(0.0, 0.0, 1.0),
-            file: SubFileRef::UnresolvedRef("aaaaaaddd".to_string()),
+            file: "aaaaaaddd".to_string(),
         });
         assert_eq!(
             file_ref_cmd(b"16 0 0 0 1 0 0 0 1 0 0 0 1 aaaaaaddd"),
@@ -2006,7 +1862,7 @@ mod tests {
             row0: Vec3::new(1.0, 0.0, 0.0),
             row1: Vec3::new(0.0, 1.0, 0.0),
             row2: Vec3::new(0.0, 0.0, 1.0),
-            file: SubFileRef::UnresolvedRef("aa/aaaaddd".to_string()),
+            file: "aa/aaaaddd".to_string(),
         });
         assert_eq!(
             read_line(b"1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd"),
@@ -2033,7 +1889,7 @@ mod tests {
             row0: Vec3::new(1.0, 0.0, 0.0),
             row1: Vec3::new(0.0, 1.0, 0.0),
             row2: Vec3::new(0.0, 0.0, 1.0),
-            file: SubFileRef::UnresolvedRef("aa/aaaaddd".to_string()),
+            file: "aa/aaaaddd".to_string(),
         });
         assert_eq!(
             parse_raw(b"\n0 this doesn't matter\n\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd")
@@ -2048,7 +1904,7 @@ mod tests {
             row0: Vec3::new(1.0, 0.0, 0.0),
             row1: Vec3::new(0.0, 1.0, 0.0),
             row2: Vec3::new(0.0, 0.0, 1.0),
-            file: SubFileRef::UnresolvedRef("aa/aaaaddd".to_string()),
+            file: "aa/aaaaddd".to_string(),
         });
         assert_eq!(
             parse_raw(
@@ -2064,7 +1920,7 @@ mod tests {
             row0: Vec3::new(1.0, 0.0, 0.0),
             row1: Vec3::new(0.0, 1.0, 0.0),
             row2: Vec3::new(0.0, 0.0, 1.0),
-            file: SubFileRef::UnresolvedRef("aa/aaaaddd".to_string()),
+            file: "aa/aaaaddd".to_string(),
         });
         let cmd1 = Command::SubFileRef(SubFileRefCmd {
             color: 16,
@@ -2072,7 +1928,7 @@ mod tests {
             row0: Vec3::new(1.0, 0.0, 0.0),
             row1: Vec3::new(0.0, 1.0, 0.0),
             row2: Vec3::new(0.0, 0.0, 1.0),
-            file: SubFileRef::UnresolvedRef("aa/aaaaddd".to_string()),
+            file: "aa/aaaaddd".to_string(),
         });
         assert_eq!(
             parse_raw(
@@ -2088,7 +1944,6 @@ mod tests {
         let mut source_map = SourceMap::new();
         let source_file = SourceFile {
             filename: "tata".to_string(),
-            raw_content: vec![],
             cmds: vec![Command::Triangle(TriangleCmd {
                 color: 2,
                 vertices: [
@@ -2098,10 +1953,9 @@ mod tests {
                 ],
             })],
         };
-        let source_file_ref = source_map.insert(source_file);
+        source_map.insert(source_file);
         let s = SourceFile {
             filename: "toto".to_string(),
-            raw_content: vec![],
             cmds: vec![
                 Command::Triangle(TriangleCmd {
                     color: 16,
@@ -2118,7 +1972,7 @@ mod tests {
                     row0: Vec3::new(0.0, 0.0, 0.0),
                     row1: Vec3::new(0.0, 0.0, 0.0),
                     row2: Vec3::new(0.0, 0.0, 0.0),
-                    file: SubFileRef::ResolvedRef(source_file_ref),
+                    file: "tata".to_string(),
                 }),
                 Command::Quad(QuadCmd {
                     color: 1,
@@ -2131,8 +1985,8 @@ mod tests {
                 }),
             ],
         };
-        let source_file_ref = source_map.insert(s);
-        let source_file = source_file_ref.get(&source_map);
+        source_map.insert(s);
+        let source_file = source_map.get("toto").unwrap();
         for c in source_file.iter(&source_map) {
             trace!("cmd: {:?}", c);
         }

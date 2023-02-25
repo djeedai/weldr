@@ -321,11 +321,10 @@ impl Action for ConvertCommand {
 
         // Parse recursively
         let mut source_map = weldr::SourceMap::new();
-        let source_file_ref = weldr::parse(input_str, &resolver, &mut source_map)?;
+        let source_file = weldr::parse(input_str, &resolver, &mut source_map)?;
 
         // Populate the geometry cache with the parsed data
         let mut geometry_cache = GeometryCache::new();
-        let source_file = source_file_ref.get(&source_map);
         for (draw_ctx, cmd) in source_file.iter(&source_map) {
             trace!("  cmd: {:?}", cmd);
             match cmd {

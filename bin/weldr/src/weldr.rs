@@ -211,6 +211,7 @@ impl DiskResolver {
         Ok(())
     }
 
+    // TODO: This is redundant?
     /// Resolve a relative LDraw filename reference into an actual path on disk.
     fn resolve_path(&self, filename: &str) -> Result<PathBuf, ResolveError> {
         for prefix in &self.base_paths {
@@ -225,24 +226,13 @@ impl DiskResolver {
 
 impl FileRefResolver for DiskResolver {
     fn resolve(&self, filename: &str) -> Result<Vec<u8>, ResolveError> {
-        for prefix in &self.base_paths {
-            let full_path = prefix.join(filename);
-            let file = File::open(full_path);
-            if file.is_err() {
-                continue;
-            }
-            let file = file.unwrap();
-            let mut buf_reader = BufReader::new(file);
-            let mut buffer = Vec::new();
-            match buf_reader.read_to_end(&mut buffer) {
-                Ok(_) => return Ok(buffer),
-                Err(e) => return Err(ResolveError::new(filename, e)),
-            }
-        }
-        Err(ResolveError::new(
-            filename,
-            std::io::Error::from(std::io::ErrorKind::NotFound),
-        ))
+        self.base_paths
+            .iter()
+            .find_map(|prefix| std::fs::read(prefix.join(filename)).ok())
+            .ok_or(ResolveError::new(
+                filename,
+                std::io::Error::from(std::io::ErrorKind::NotFound),
+            ))
     }
 }
 
