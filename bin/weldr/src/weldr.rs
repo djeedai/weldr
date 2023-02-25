@@ -18,6 +18,7 @@ use error::Error;
 use ansi_term::Color::{Blue, Purple, Red, Yellow};
 use log::{Metadata, Record};
 use ordered_float::NotNan;
+use path_slash::{PathBufExt, PathExt};
 use std::{
     collections::HashMap,
     fs::File,
@@ -228,9 +229,17 @@ impl FileRefResolver for DiskResolver {
     fn resolve(&self, filename: &str) -> Result<Vec<u8>, ResolveError> {
         self.base_paths
             .iter()
-            .find_map(|prefix| std::fs::read(prefix.join(filename)).ok())
+            .find_map(|prefix| {
+                // The file's path separator may not match the current OS.
+                // Don't assume the current file system and try both separators.
+                let forward_path = prefix.join(PathBuf::from_slash(&filename));
+                let backward_path = prefix.join(PathBuf::from_backslash(&filename));
+                std::fs::read(prefix.join(forward_path))
+                    .or_else(|_| std::fs::read(prefix.join(backward_path)))
+                    .ok()
+            })
             .ok_or(ResolveError::new(
-                filename,
+                filename.to_string(),
                 std::io::Error::from(std::io::ErrorKind::NotFound),
             ))
     }

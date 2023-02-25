@@ -150,7 +150,7 @@ mod tests {
             parse_error: None,
         });
         Err(Error::Resolve(ResolveError::new(
-            "test_file.ldr",
+            "test_file.ldr".to_string(),
             underlying,
         )))
     }

@@ -273,9 +273,8 @@ impl Action for ConvertCommand {
         }
 
         // Setup disk resolver
-        let mut resolver: DiskResolver;
-        if let Some(catalog_path) = &self.catalog_path {
-            resolver = DiskResolver::new_from_catalog(catalog_path)?;
+        let mut resolver = if let Some(catalog_path) = &self.catalog_path {
+            DiskResolver::new_from_catalog(catalog_path)
         } else if let Ok(cwd) = std::env::current_dir() {
             info!(
                 "No catalog path specified; using current working directory '{}'",
@@ -289,14 +288,15 @@ impl Action for ConvertCommand {
                     arg_style.paint("-C")
                 )[..],
             );
-            resolver = DiskResolver::new_from_catalog(cwd)?;
+            DiskResolver::new_from_catalog(cwd)
         } else {
             // This is quite difficult to hit (and so, to test), since getting current_dir()
             // to fail is unlikely (docs say "dir does not exist or wrong permission", but the
             // former is quite difficult to get into since the OS will generally prevent delete
             // if some process has the folder as its current directory).
-            return Err(Error::NoLDrawCatalog);
-        }
+            Err(Error::NoLDrawCatalog)
+        }?;
+
         if let Some(include_paths) = &self.include_paths {
             for path in include_paths {
                 resolver.add_path(path).map_err(|e| {
