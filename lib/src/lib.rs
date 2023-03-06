@@ -829,7 +829,7 @@ fn load_and_parse_single_file(
 /// Parse a single file and its sub-file references recursively.
 ///
 /// Attempt to load the content of `filename` via the given `resolver`, and parse it.
-/// Then recursiverly look for sub-file commands inside that root file, and try to resolve
+/// Then recursively look for sub-file commands inside that root file, and try to resolve
 /// the content of those sub-files and parse them too. All the loaded and parsed files end
 /// up populating the given `source_map`, which can be pre-populated manually or from a
 /// previous call with already loaded and parsed files.
@@ -847,19 +847,19 @@ fn load_and_parse_single_file(
 /// fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///   let resolver = MyCustomResolver{};
 ///   let mut source_map = SourceMap::new();
-///   let root_file = parse("root.ldr", &resolver, &mut source_map)?;
+///   let main_model_name = parse("root.ldr", &resolver, &mut source_map)?;
+///   let root_file = source_map.get(&main_model_name).unwrap();
 ///   assert_eq!(root_file.filename, "root.ldr");
 ///   Ok(())
 /// }
 /// ```
-pub fn parse<'a, R: FileRefResolver>(
+pub fn parse<R: FileRefResolver>(
     filename: &str,
     resolver: &R,
     source_map: &mut SourceMap,
-) -> Result<SourceFile, Error> {
-    // TODO: Avoid clone.
-    if let Some(existing_file) = source_map.get(filename) {
-        return Ok(existing_file.clone());
+) -> Result<String, Error> {
+    if source_map.get(filename).is_some() {
+        return Ok(filename.into());
     }
 
     // Use a stack to avoid function recursion in load_file.
@@ -893,7 +893,7 @@ fn load_file<R: FileRefResolver>(
     resolver: &R,
     source_map: &mut SourceMap,
     stack: &mut Vec<FileRef>,
-) -> Result<SourceFile, Error> {
+) -> Result<String, Error> {
     let source_file = load_and_parse_single_file(filename, resolver)?;
     source_map.queue_subfiles(&source_file, stack);
     Ok(source_map.insert(source_file))
@@ -1072,8 +1072,9 @@ impl SourceMap {
     }
 
     /// Inserts a new source file into the collection.
-    /// Returns a copy of `source_file` or the main file for multi-part documents (MPD).
-    pub fn insert(&mut self, source_file: SourceFile) -> SourceFile {
+    /// Returns a copy of the filename of `source_file`
+    /// or the filename of the main file for multi-part documents (MPD).
+    pub fn insert(&mut self, source_file: SourceFile) -> String {
         // The MPD extension allows .ldr or .mpd files to contain multiple files.
         // Add each of these so that they can be resolved by subfile commands later.
         let files = split_files(&source_file.cmds);
@@ -1082,14 +1083,14 @@ impl SourceMap {
             // TODO: More cleanly handle the fact that not all files have 0 FILE commands.
             self.source_files
                 .insert(source_file.filename.clone(), source_file.clone());
-            source_file
+            source_file.filename
         } else {
             // The first block is the "main model" of the file.
-            let root_file = files[0].clone();
+            let main_model_name = files[0].filename.clone();
             for file in files {
                 self.source_files.insert(file.filename.clone(), file);
             }
-            root_file
+            main_model_name
         }
     }
 

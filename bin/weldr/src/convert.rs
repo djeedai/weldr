@@ -193,7 +193,7 @@ impl ConvertCommand {
     fn write_gltf(
         &self,
         source_file: &weldr::SourceFile,
-        source_map: &mut weldr::SourceMap,
+        source_map: &weldr::SourceMap,
     ) -> Result<(), Error> {
         let asset = gltf::Asset {
             version: "2.0".to_string(),
@@ -426,10 +426,11 @@ impl Action for ConvertCommand {
 
         // Parse recursively
         let mut source_map = weldr::SourceMap::new();
-        let source_file = weldr::parse(input_str, &resolver, &mut source_map)?;
+        let main_model_name = weldr::parse(input_str, &resolver, &mut source_map)?;
+        let root_file = source_map.get(&main_model_name).unwrap();
 
         match self.format {
-            ConvertFormat::Gltf => self.write_gltf(&source_file, &mut source_map),
+            ConvertFormat::Gltf => self.write_gltf(&root_file, &source_map),
         }
     }
 }

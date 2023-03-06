@@ -73,7 +73,8 @@ fn parse_recursive() {
         b"4 16 1 1 0 0.9239 1 0.3827 0.9239 0 0.3827 1 0 0\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 a.ldr",
     );
     let mut source_map = weldr::SourceMap::new();
-    let root_file = weldr::parse("root.ldr", &memory_resolver, &mut source_map).unwrap();
+    let root_file_name = weldr::parse("root.ldr", &memory_resolver, &mut source_map).unwrap();
+    let root_file = source_map.get(&root_file_name).unwrap();
     assert_eq!(3, root_file.cmds.len());
 
     let file0 = get_resolved_subfile_ref(&root_file.cmds[0]).unwrap();
