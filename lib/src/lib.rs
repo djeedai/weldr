@@ -1073,7 +1073,7 @@ impl SourceMap {
     pub fn insert(&mut self, source_file: SourceFile) -> String {
         // The MPD extension allows .ldr or .mpd files to contain multiple files.
         // Add each of these so that they can be resolved by subfile commands later.
-        let files = split_files(&source_file.cmds);
+        let files = split_mpd_file(&source_file.cmds);
 
         if files.is_empty() {
             // TODO: More cleanly handle the fact that not all files have 0 FILE commands.
@@ -1112,7 +1112,7 @@ impl SourceMap {
     }
 }
 
-fn split_files(commands: &[Command]) -> Vec<SourceFile> {
+fn split_mpd_file(commands: &[Command]) -> Vec<SourceFile> {
     commands
         .iter()
         .enumerate()
@@ -2055,7 +2055,7 @@ mod tests {
             }),
             Command::NoFile,
         ];
-        let subfiles = split_files(&commands);
+        let subfiles = split_mpd_file(&commands);
         assert_eq!(
             vec![
                 SourceFile {
@@ -2098,7 +2098,7 @@ mod tests {
             }),
         ];
 
-        let subfiles = split_files(&commands);
+        let subfiles = split_mpd_file(&commands);
         assert_eq!(
             vec![
                 SourceFile {
