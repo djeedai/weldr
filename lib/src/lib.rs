@@ -877,10 +877,6 @@ pub fn parse<R: FileRefResolver>(
             None => {
                 trace!("Not yet parsed; parsing sub-file: {}", filename);
                 load_file(filename, resolver, source_map, &mut stack)?;
-                trace!(
-                    "Post-loading resolving subfile refs of sub-file: {}",
-                    filename
-                );
             }
         }
     }
