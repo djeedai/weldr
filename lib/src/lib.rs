@@ -198,7 +198,7 @@ fn keywords(i: &[u8]) -> IResult<&[u8], Command> {
 }
 
 /// RGB color in sRGB color space.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Color {
     pub red: u8,
     pub green: u8,
