@@ -18,12 +18,9 @@ use error::Error;
 use ansi_term::Color::{Blue, Purple, Red, Yellow};
 use log::{Metadata, Record};
 use ordered_float::NotNan;
-use path_slash::{PathBufExt, PathExt};
+use path_slash::PathBufExt;
 use std::{
     collections::HashMap,
-    fs::File,
-    io::BufReader,
-    io::Read,
     path::{Path, PathBuf},
 };
 use structopt::StructOpt;
@@ -212,7 +209,6 @@ impl DiskResolver {
         Ok(())
     }
 
-    // TODO: This is redundant?
     /// Resolve a relative LDraw filename reference into an actual path on disk.
     fn resolve_path(&self, filename: &str) -> Result<PathBuf, ResolveError> {
         for prefix in &self.base_paths {
@@ -227,13 +223,14 @@ impl DiskResolver {
 
 impl FileRefResolver for DiskResolver {
     fn resolve(&self, filename: &str) -> Result<Vec<u8>, ResolveError> {
+        // TODO: This doesn't work with relative paths as the main ldr path?
         self.base_paths
             .iter()
             .find_map(|prefix| {
                 // The file's path separator may not match the current OS.
                 // Don't assume the current file system and try both separators.
-                let forward_path = prefix.join(PathBuf::from_slash(&filename));
-                let backward_path = prefix.join(PathBuf::from_backslash(&filename));
+                let forward_path = prefix.join(PathBuf::from_slash(filename));
+                let backward_path = prefix.join(PathBuf::from_backslash(filename));
                 std::fs::read(prefix.join(forward_path))
                     .or_else(|_| std::fs::read(prefix.join(backward_path)))
                     .ok()
@@ -283,14 +280,6 @@ impl std::convert::From<&Vec3> for VecRef {
             z: NotNan::new(vec.z).unwrap(),
         }
     }
-}
-
-struct GeometryBuffer {
-    size: usize,
-    offset: usize,
-    stride: usize,
-    component_type: gltf::ComponentType,
-    attribute_type: gltf::AttributeType,
 }
 
 struct GeometryCache {

@@ -3,7 +3,7 @@
 use crate::{
     as_u8_slice,
     error::{Error, Utf8Error},
-    gltf, Action, App, DiskResolver, GeometryBuffer, GeometryCache,
+    gltf, Action, App, DiskResolver, GeometryCache,
 };
 
 use ansi_term::Style;
@@ -77,18 +77,14 @@ impl std::fmt::Display for ConvertFormat {
 }
 
 impl ConvertCommand {
-    fn write_impl(&self, blobs: &[&[u8]], file_ext: &str) -> Result<(), Error> {
+    fn write_impl(&self, data: &[u8], file_ext: &str) -> Result<(), Error> {
         if let Some(output) = &self.output {
             let path = output.with_extension(file_ext);
             let mut file = File::create(path).unwrap();
-            for data in blobs {
-                file.write_all(data).map_err(Error::GltfWrite)?;
-            }
+            file.write_all(data).map_err(Error::GltfWrite)?;
         } else {
             let mut stdout = std::io::stdout();
-            for data in blobs {
-                stdout.write_all(data).map_err(Error::GltfWrite)?;
-            }
+            stdout.write_all(data).map_err(Error::GltfWrite)?;
         }
         Ok(())
     }
@@ -107,154 +103,261 @@ impl ConvertCommand {
         }
     }
 
-    fn write_gltf(&self, geometry_cache: &GeometryCache) -> Result<(), Error> {
-        // Write binary buffers
-        let vertices = &geometry_cache.vertices[..];
-        let vertices_bytes: &[u8] = unsafe { as_u8_slice(vertices) };
-        let line_indices = &geometry_cache.line_indices[..];
-        let line_indices_bytes: &[u8] = unsafe { as_u8_slice(line_indices) };
-        let triangle_indices = &geometry_cache.triangle_indices[..];
-        let triangle_indices_bytes: &[u8] = unsafe { as_u8_slice(triangle_indices) };
-        self.write_impl(
-            &[vertices_bytes, line_indices_bytes, triangle_indices_bytes],
-            "glbuf",
-        )?;
-
-        // Prepare geometry buffers for glTF writing
-        let mut offset: usize = 0;
-        let vertex_buffer = GeometryBuffer {
-            size: vertices_bytes.len(),
-            offset,
-            stride: 12,
-            component_type: gltf::ComponentType::Float,
-            attribute_type: gltf::AttributeType::Vec3,
+    fn add_nodes(
+        &self,
+        source_file: &weldr::SourceFile,
+        transform: weldr::Mat4,
+        source_map: &weldr::SourceMap,
+        gltf: &mut gltf::Gltf,
+        buffer: &mut Vec<u8>,
+        mesh_cache: &mut HashMap<String, Option<usize>>,
+    ) -> u32 {
+        let matrix = if transform == weldr::Mat4::from_scale(1.0) {
+            None
+        } else {
+            Some([
+                transform.x.x,
+                transform.x.y,
+                transform.x.z,
+                transform.x.w,
+                transform.y.x,
+                transform.y.y,
+                transform.y.z,
+                transform.y.w,
+                transform.z.x,
+                transform.z.y,
+                transform.z.z,
+                transform.z.w,
+                transform.w.x,
+                transform.w.y,
+                transform.w.z,
+                transform.w.w,
+            ])
         };
-        offset += vertex_buffer.size;
 
-        let mut index_buffers = vec![];
-        if !geometry_cache.line_indices.is_empty() {
-            let buffer = GeometryBuffer {
-                size: line_indices_bytes.len(),
-                offset,
-                stride: 4,
-                component_type: gltf::ComponentType::UnsignedInt,
-                attribute_type: gltf::AttributeType::Scalar,
-            };
-            offset += buffer.size;
-            index_buffers.push(buffer);
-        }
-        if !geometry_cache.triangle_indices.is_empty() {
-            let buffer = GeometryBuffer {
-                size: triangle_indices_bytes.len(),
-                offset,
-                stride: 4,
-                component_type: gltf::ComponentType::UnsignedInt,
-                attribute_type: gltf::AttributeType::Scalar,
-            };
-            //offset += buffer.size;
-            index_buffers.push(buffer);
+        let node_index = gltf.nodes.len();
+        let node = gltf::Node {
+            name: Some(source_file.filename.clone()),
+            children: Vec::new(),
+            mesh_index: None,
+            matrix,
+        };
+        gltf.nodes.push(node);
+
+        // TODO: Check the part type rather than the extension.
+        if source_file.filename.ends_with(".dat") {
+            // Create geometry if the node is a part.
+            let mesh_index = mesh_cache
+                .entry(source_file.filename.clone())
+                .or_insert_with(|| {
+                    let mesh_index = gltf.meshes.len();
+                    let geometry = self.create_geometry(source_file, source_map);
+                    // Don't set empty meshes to avoid import errors.
+                    if !geometry.vertices.is_empty() && !geometry.triangle_indices.is_empty() {
+                        self.add_mesh(&geometry, gltf, buffer);
+                        Some(mesh_index)
+                    } else {
+                        None
+                    }
+                });
+
+            gltf.nodes[node_index].mesh_index = mesh_index.map(|i| i as u32);
+        } else {
+            for cmd in &source_file.cmds {
+                if let Command::SubFileRef(sfr_cmd) = cmd {
+                    if let Some(subfile) = source_map.get(&sfr_cmd.file) {
+                        // Don't apply node transforms to preserve the scene hierarchy.
+                        // Applications should handle combining the transforms.
+                        let transform = weldr::Mat4::from_cols(
+                            weldr::Vec4::new(sfr_cmd.row0.x, sfr_cmd.row1.x, sfr_cmd.row2.x, 0.0),
+                            weldr::Vec4::new(sfr_cmd.row0.y, sfr_cmd.row1.y, sfr_cmd.row2.y, 0.0),
+                            weldr::Vec4::new(sfr_cmd.row0.z, sfr_cmd.row1.z, sfr_cmd.row2.z, 0.0),
+                            weldr::Vec4::new(sfr_cmd.pos.x, sfr_cmd.pos.y, sfr_cmd.pos.z, 1.0),
+                        );
+
+                        let child_node_index = self
+                            .add_nodes(subfile, transform, source_map, gltf, buffer, mesh_cache);
+                        gltf.nodes[node_index].children.push(child_node_index);
+                    }
+                }
+            }
         }
 
+        node_index as u32
+    }
+
+    fn write_gltf(
+        &self,
+        source_file: &weldr::SourceFile,
+        source_map: &mut weldr::SourceMap,
+    ) -> Result<(), Error> {
         let asset = gltf::Asset {
             version: "2.0".to_string(),
             min_version: None,
             generator: Some("weldr".to_string()),
             copyright: None,
         };
-        let node = gltf::Node {
-            name: None,
-            children: vec![],
-            mesh_index: Some(0),
-        };
         let scene = gltf::Scene {
             name: None,
             nodes: vec![0],
         };
-        let mut attributes: HashMap<String, u32> = HashMap::new();
-        attributes.insert("POSITION".to_string(), 0);
-        let mesh = gltf::Mesh {
-            name: None,
-            primitives: [
-                (&geometry_cache.line_indices, gltf::PrimitiveMode::Lines, 1),
-                (
-                    &geometry_cache.triangle_indices,
-                    gltf::PrimitiveMode::Triangles,
-                    if geometry_cache.line_indices.is_empty() {
-                        1
-                    } else {
-                        2
-                    },
-                ),
-            ]
-            .iter()
-            .filter(|(buf, _, _)| !buf.is_empty())
-            .map(|(_, mode, accessor_index)| gltf::Primitive {
-                attributes: attributes.clone(),
-                indices: *accessor_index,
-                mode: *mode,
-            })
-            .collect(),
-        };
-        let total_index_byte_size: usize = index_buffers.iter().map(|buf| buf.size).sum();
-        let total_byte_size = vertex_buffer.size + total_index_byte_size;
-        let buffers = vec![gltf::Buffer {
-            name: None,
-            byte_length: total_byte_size as u32,
-            uri: Some(self.get_bin_file_uri()),
-        }];
-        let buffer_views = vec![
-            gltf::BufferView {
-                name: Some("vertex_buffer".to_string()),
-                //target: 34962, // ARRAY_BUFFER
-                buffer_index: 0,
-                byte_length: vertex_buffer.size as u32,
-                byte_offset: 0,
-                byte_stride: Some(vertex_buffer.stride as u32),
-            },
-            gltf::BufferView {
-                name: Some("index_buffer".to_string()),
-                //target: 34963, // ELEMENT_ARRAY_BUFFER
-                buffer_index: 0,
-                byte_length: total_index_byte_size as u32,
-                byte_offset: vertex_buffer.size as u32,
-                byte_stride: Some(4), // TODO: do not hardcode
-            },
-        ];
-        let mut accessors = vec![gltf::Accessor {
-            name: Some("vertex_data".to_string()),
-            component_type: vertex_buffer.component_type,
-            count: (vertex_buffer.size / vertex_buffer.stride) as u32,
-            attribute_type: vertex_buffer.attribute_type,
-            buffer_view_index: 0,
-            byte_offset: 0,
-            normalized: false,
-        }];
-        let mut byte_offset = 0;
-        for buf in index_buffers {
-            accessors.push(gltf::Accessor {
-                name: Some("index_data".to_string()),
-                component_type: buf.component_type,
-                count: (buf.size / buf.stride) as u32,
-                attribute_type: buf.attribute_type,
-                buffer_view_index: 1,
-                byte_offset,
-                normalized: false,
-            });
-            byte_offset += buf.size as u32;
-        }
-        let gltf = gltf::Gltf {
+
+        let mut gltf = gltf::Gltf {
             asset,
-            nodes: vec![node],
+            nodes: Vec::new(),
             scenes: vec![scene],
-            buffers,
-            buffer_views,
-            accessors,
-            meshes: vec![mesh],
+            buffers: Vec::new(),
+            buffer_views: Vec::new(),
+            accessors: Vec::new(),
+            meshes: Vec::new(),
             scene: Some(0),
         };
+
+        let mut buffer = Vec::new();
+
+        // Avoid creating the same mesh more than once.
+        // This also saves memory for importers with instancing support.
+        let mut filename_to_mesh_index = HashMap::new();
+
+        // Recursively add a node for each file.
+        self.add_nodes(
+            source_file,
+            weldr::Mat4::from_scale(1.0),
+            source_map,
+            &mut gltf,
+            &mut buffer,
+            &mut filename_to_mesh_index,
+        );
+
+        gltf.buffers.push(gltf::Buffer {
+            name: None,
+            byte_length: buffer.len() as u32,
+            uri: Some(self.get_bin_file_uri()),
+        });
+
+        self.write_impl(&buffer, "glbuf")?;
+
         let json = serde_json::to_string_pretty(&gltf)?;
-        let json = json.as_bytes();
-        self.write_impl(&[json], "gltf")
+        self.write_impl(json.as_bytes(), "gltf")
+    }
+
+    fn create_geometry(
+        &self,
+        source_file: &weldr::SourceFile,
+        source_map: &weldr::SourceMap,
+    ) -> GeometryCache {
+        let mut geometry_cache = GeometryCache::new();
+        for (draw_ctx, cmd) in source_file.iter(source_map) {
+            trace!("  cmd: {:?}", cmd);
+            match cmd {
+                Command::Line(l) => {
+                    if self.lines_enabled {
+                        geometry_cache.add_line(&draw_ctx, &l.vertices)
+                    }
+                }
+                Command::Triangle(t) => geometry_cache.add_triangle(&draw_ctx, &t.vertices),
+                Command::Quad(q) => geometry_cache.add_quad(&draw_ctx, &q.vertices),
+                Command::OptLine(l) => {
+                    if self.lines_enabled {
+                        geometry_cache.add_line(&draw_ctx, &l.vertices)
+                    }
+                }
+                _ => {}
+            }
+        }
+        geometry_cache
+    }
+
+    fn add_mesh(
+        &self,
+        geometry_cache: &GeometryCache,
+        gltf: &mut gltf::Gltf,
+        buffer: &mut Vec<u8>,
+    ) {
+        let vertices = &geometry_cache.vertices;
+        let vertices_bytes: &[u8] = unsafe { as_u8_slice(vertices) };
+
+        // TODO: Line indices?
+        let vertex_buffer_view_index = gltf.buffer_views.len() as u32;
+        gltf.buffer_views.push(gltf::BufferView {
+            name: Some("vertex_buffer".to_string()),
+            buffer_index: 0,
+            byte_length: vertices_bytes.len() as u32,
+            byte_offset: buffer.len() as u32,
+            byte_stride: Some(12),
+            target: Some(gltf::BufferTarget::ArrayBuffer as u32),
+        });
+        buffer.extend_from_slice(vertices_bytes);
+
+        let vertex_accessor = gltf::Accessor {
+            name: Some("vertex_data".to_string()),
+            component_type: gltf::ComponentType::Float,
+            count: vertices.len() as u32,
+            attribute_type: gltf::AttributeType::Vec3,
+            buffer_view_index: vertex_buffer_view_index,
+            byte_offset: 0,
+            normalized: false,
+            min: vertices
+                .iter()
+                .copied()
+                .reduce(|a, b| weldr::Vec3::new(a.x.min(b.x), a.y.min(b.y), a.z.min(b.z)))
+                .map(|v| [v.x, v.y, v.z]),
+            max: vertices
+                .iter()
+                .copied()
+                .reduce(|a, b| weldr::Vec3::new(a.x.max(b.x), a.y.max(b.y), a.z.max(b.z)))
+                .map(|v| [v.x, v.y, v.z]),
+        };
+
+        let mut primitives = Vec::new();
+        // TODO: Line indices.
+        if !geometry_cache.triangle_indices.is_empty() {
+            let attributes = HashMap::from([("POSITION".to_string(), gltf.accessors.len() as u32)]);
+            gltf.accessors.push(vertex_accessor);
+
+            // TODO: Use bytemuck instead.
+            let triangle_indices = &geometry_cache.triangle_indices;
+            let triangle_indices_bytes: &[u8] = unsafe { as_u8_slice(triangle_indices) };
+
+            let index_buffer_view_index = gltf.buffer_views.len() as u32;
+            gltf.buffer_views.push(gltf::BufferView {
+                name: Some("index_buffer".to_string()),
+                buffer_index: 0,
+                byte_length: triangle_indices_bytes.len() as u32,
+                byte_offset: buffer.len() as u32,
+                byte_stride: None,
+                target: Some(gltf::BufferTarget::ElementArrayBuffer as u32),
+            });
+            buffer.extend_from_slice(triangle_indices_bytes);
+
+            let index_accessor = gltf::Accessor {
+                name: Some("index_data".to_string()),
+                component_type: gltf::ComponentType::UnsignedInt,
+                count: geometry_cache.triangle_indices.len() as u32,
+                attribute_type: gltf::AttributeType::Scalar,
+                buffer_view_index: index_buffer_view_index,
+                byte_offset: 0,
+                normalized: false,
+                min: None,
+                max: None,
+            };
+
+            let primitive = gltf::Primitive {
+                attributes,
+                indices: gltf.accessors.len() as u32,
+                mode: gltf::PrimitiveMode::Triangles,
+            };
+            primitives.push(primitive);
+            gltf.accessors.push(index_accessor);
+        }
+
+        // TODO: mesh name?
+        let mesh = gltf::Mesh {
+            name: None,
+            primitives,
+        };
+
+        gltf.meshes.push(mesh);
     }
 }
 
@@ -281,13 +384,11 @@ impl Action for ConvertCommand {
                 cwd.to_str().unwrap_or("(invalid path)")
             );
             let arg_style = Style::new().bold();
-            app.tip(
-                &format!(
-                    "Use {}/{} to specify the location of a catalog to resolve files.",
-                    arg_style.paint("--catalog-path"),
-                    arg_style.paint("-C")
-                )[..],
-            );
+            app.tip(&format!(
+                "Use {}/{} to specify the location of a catalog to resolve files.",
+                arg_style.paint("--catalog-path"),
+                arg_style.paint("-C")
+            ));
             DiskResolver::new_from_catalog(cwd)
         } else {
             // This is quite difficult to hit (and so, to test), since getting current_dir()
@@ -323,35 +424,8 @@ impl Action for ConvertCommand {
         let mut source_map = weldr::SourceMap::new();
         let source_file = weldr::parse(input_str, &resolver, &mut source_map)?;
 
-        // Populate the geometry cache with the parsed data
-        let mut geometry_cache = GeometryCache::new();
-        for (draw_ctx, cmd) in source_file.iter(&source_map) {
-            trace!("  cmd: {:?}", cmd);
-            match cmd {
-                Command::Line(l) => {
-                    if self.lines_enabled {
-                        geometry_cache.add_line(&draw_ctx, &l.vertices)
-                    }
-                }
-                Command::Triangle(t) => geometry_cache.add_triangle(&draw_ctx, &t.vertices),
-                Command::Quad(q) => geometry_cache.add_quad(&draw_ctx, &q.vertices),
-                Command::OptLine(l) => {
-                    if self.lines_enabled {
-                        geometry_cache.add_line(&draw_ctx, &l.vertices)
-                    }
-                }
-                _ => {}
-            }
-        }
-        // for v in &geometry_cache.vertices {
-        //     trace!("vec: {:?}", v);
-        // }
-        // for i in &geometry_cache.indices {
-        //     trace!("idx: {:?}", i);
-        // }
-
         match self.format {
-            ConvertFormat::Gltf => self.write_gltf(&geometry_cache),
+            ConvertFormat::Gltf => self.write_gltf(&source_file, &mut source_map),
         }
     }
 }

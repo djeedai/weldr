@@ -1,8 +1,18 @@
 extern crate weldr;
 
-use weldr::{error::ResolveError, Command, FileRefResolver, SourceMap, SubFileRefCmd};
+use weldr::{error::ResolveError, Command, FileRefResolver, SourceFile, SourceMap, SubFileRefCmd};
 
 use std::collections::HashMap;
+
+fn print_rec(source_map: &SourceMap, source_file: &SourceFile, indent: usize) {
+    eprintln!("{}{}", " ".repeat(indent), source_file.filename);
+    for cmd in &source_file.cmds {
+        if let Command::SubFileRef(sfr_cmd) = cmd {
+            let resolved_file = source_map.get(&sfr_cmd.file).unwrap();
+            print_rec(source_map, resolved_file, indent + 2);
+        }
+    }
+}
 
 /// A simple in-memory file resolver where files and their content are manually
 /// added before being resolved.
@@ -55,7 +65,6 @@ fn test_memory_resolver() {
 
 #[test]
 fn parse_recursive() {
-    // TODO: Fix this test case.
     let mut memory_resolver = MemoryResolver::new();
     memory_resolver.add("root.ldr", b"1 16 0 0 0 1 0 0 0 1 0 0 0 1 a.ldr\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 b.ldr\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 a.ldr");
     memory_resolver.add("a.ldr", b"4 16 1 1 0 0.9239 1 0.3827 0.9239 0 0.3827 1 0 0");
@@ -83,4 +92,5 @@ fn parse_recursive() {
     let file1b = get_resolved_subfile_ref(&source_map.get(&file1.file).unwrap().cmds[1]).unwrap();
     assert_eq!(source_map.get(&file1b.file).unwrap().filename, "a.ldr");
     assert_eq!(file0, file1b);
+    print_rec(&source_map, &root_file, 0);
 }

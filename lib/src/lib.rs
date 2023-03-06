@@ -67,12 +67,13 @@
 #[macro_use]
 extern crate log;
 
+use base64::Engine;
 use nom::{
     branch::alt,
     bytes::complete::{tag, tag_no_case, take_while, take_while1, take_while_m_n},
     character::{
         complete::{digit1, line_ending as eol},
-        is_digit,
+        is_alphanumeric, is_digit,
     },
     combinator::{complete, map, map_res, opt},
     error::ErrorKind,
@@ -408,11 +409,57 @@ fn comment(i: &[u8]) -> IResult<&[u8], Command> {
     Ok((i, Command::Comment(CommentCmd::new(comment))))
 }
 
+fn meta_file(i: &[u8]) -> IResult<&[u8], Command> {
+    let (i, _) = tag(b"FILE")(i)?;
+    let (i, _) = sp(i)?;
+    let (i, file) = map_res(take_not_cr_or_lf, str::from_utf8)(i)?;
+
+    Ok((
+        i,
+        Command::File(FileCmd {
+            file: file.to_string(),
+        }),
+    ))
+}
+
+fn meta_data(i: &[u8]) -> IResult<&[u8], Command> {
+    let (i, _) = tag(b"!DATA")(i)?;
+    let (i, _) = sp(i)?;
+    let (i, file) = map_res(take_not_cr_or_lf, str::from_utf8)(i)?;
+
+    Ok((
+        i,
+        Command::Data(DataCmd {
+            file: file.to_string(),
+        }),
+    ))
+}
+
+fn meta_base_64_data(i: &[u8]) -> IResult<&[u8], Command> {
+    // TODO: Validate base64 characters?
+    let (i, _) = tag(b"!:")(i)?;
+    let (i, _) = sp(i)?;
+    let (i, data) = map_res(take_not_cr_or_lf, |b| {
+        base64::engine::general_purpose::STANDARD_NO_PAD.decode(b)
+    })(i)?;
+
+    Ok((i, Command::Base64Data(Base64DataCmd { data })))
+}
+
+fn meta_nofile(i: &[u8]) -> IResult<&[u8], Command> {
+    let (i, _) = tag(b"NOFILE")(i)?;
+    Ok((i, Command::NoFile))
+}
+
 fn meta_cmd(i: &[u8]) -> IResult<&[u8], Command> {
     alt((
         complete(category),
         complete(keywords),
         complete(meta_colour),
+        complete(meta_file),
+        complete(meta_nofile),
+        complete(meta_data),
+        complete(meta_base_64_data),
         comment,
     ))(i)
 }
@@ -424,6 +471,16 @@ fn read_vec3(i: &[u8]) -> IResult<&[u8], Vec3> {
 
 fn color_id(i: &[u8]) -> IResult<&[u8], u32> {
     map_res(map_res(digit1, str::from_utf8), str::parse::<u32>)(i)
+}
+
+#[inline]
+fn is_filename_char(chr: u8) -> bool {
+    is_alphanumeric(chr) || chr == b'/' || chr == b'\\' || chr == b'.' || chr == b'-'
+}
+
+fn filename_char(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    // TODO - Split at EOL instead and accept all characters for filename?
+    i.split_at_position1_complete(|item| !is_filename_char(item), ErrorKind::AlphaNumeric)
 }
 
 fn filename(i: &[u8]) -> IResult<&[u8], &str> {
@@ -452,7 +509,7 @@ fn file_ref_cmd(i: &[u8]) -> IResult<&[u8], Command> {
             row0,
             row1,
             row2,
-            file: file.to_string(),
+            file: file.into(),
         }),
     ))
 }
@@ -619,7 +676,7 @@ fn parse_raw_with_filename(filename: &str, ldr_content: &[u8]) -> Result<Vec<Com
     )
 }
 
-struct QueuedFileRef {
+struct FileRef {
     /// Filename of unresolved source file.
     filename: String,
     /// Referer source file which requested the resolution.
@@ -705,10 +762,8 @@ impl<'a> Iterator for CommandIterator<'a> {
     type Item = (DrawContext, &'a Command);
 
     fn next(&mut self) -> Option<(DrawContext, &'a Command)> {
-        while let Some(entry) = self.stack.last_mut() {
-            let cmds = &entry.0.cmds;
-            let index = &mut entry.1;
-            let draw_ctx = &entry.2;
+        while let Some((file, index, draw_ctx)) = self.stack.last_mut() {
+            let cmds = &file.cmds;
             if *index < cmds.len() {
                 let cmd = &cmds[*index];
                 *index += 1;
@@ -761,17 +816,14 @@ fn load_and_parse_single_file(
     filename: &str,
     resolver: &dyn FileRefResolver,
 ) -> Result<SourceFile, Error> {
-    // TODO: Move parse functions to SourceFile itself?
     // We should never have "unparsed" source files.
     // Caching only is always keyed by filenames anyway.
     let raw_content = resolver.resolve(filename)?;
-    let mut source_file = SourceFile {
+    let cmds = parse_raw_with_filename(filename, &raw_content)?;
+    Ok(SourceFile {
         filename: filename.to_string(),
-        cmds: Vec::new(),
-    };
-    let cmds = parse_raw_with_filename(&source_file.filename, &raw_content)?;
-    source_file.cmds = cmds;
-    Ok(source_file)
+        cmds,
+    })
 }
 
 /// Parse a single file and its sub-file references recursively.
@@ -800,42 +852,31 @@ fn load_and_parse_single_file(
 ///   Ok(())
 /// }
 /// ```
-pub fn parse(
+pub fn parse<'a, R: FileRefResolver>(
     filename: &str,
-    resolver: &dyn FileRefResolver,
+    resolver: &R,
     source_map: &mut SourceMap,
 ) -> Result<SourceFile, Error> {
     // TODO: Avoid clone.
     if let Some(existing_file) = source_map.get(filename) {
-        // TODO: Caching is handled here, so the disk resolver doesn't need to cache?
-        // TODO: Is this fact documented?
-        // TODO: If we have the SourceMap, can't we just return an actual reference?
         return Ok(existing_file.clone());
     }
 
+    // Use a stack to avoid function recursion in load_file.
+    let mut stack: Vec<FileRef> = Vec::new();
+
     debug!("Processing root file '{}'", filename);
-    let root_file = load_and_parse_single_file(filename, resolver)?;
-    trace!(
-        "Post-loading resolving subfile refs of root file: {}",
-        filename
-    );
+    let actual_root = load_file(filename, resolver, source_map, &mut stack)?;
 
-    // Use a data structure to avoid function recursion.
-    // TODO: Is it easier to use a stack instead?
-    let mut queue = Vec::new();
-    source_map.queue_subfiles(&root_file, &mut queue);
-    source_map.insert(root_file);
-
-    while let Some(queued_file) = queue.pop() {
-        let filename = &queued_file.filename;
+    // Recursively load files referenced by the root file.
+    while let Some(file) = stack.pop() {
+        let filename = &file.filename;
         debug!("Processing sub-file: '{}'", filename);
         match source_map.get(filename) {
             Some(_) => trace!("Already parsed; reusing sub-file: {}", filename),
             None => {
                 trace!("Not yet parsed; parsing sub-file: {}", filename);
-                let source_file = load_and_parse_single_file(filename, resolver)?;
-                source_map.queue_subfiles(&source_file, &mut queue);
-                source_map.insert(source_file);
+                load_file(filename, resolver, source_map, &mut stack)?;
                 trace!(
                     "Post-loading resolving subfile refs of sub-file: {}",
                     filename
@@ -844,8 +885,18 @@ pub fn parse(
         }
     }
 
-    // TODO: Fix this.
-    Ok(source_map.get(filename).unwrap().clone())
+    Ok(actual_root)
+}
+
+fn load_file<R: FileRefResolver>(
+    filename: &str,
+    resolver: &R,
+    source_map: &mut SourceMap,
+    stack: &mut Vec<FileRef>,
+) -> Result<SourceFile, Error> {
+    let source_file = load_and_parse_single_file(filename, resolver)?;
+    source_map.queue_subfiles(&source_file, stack);
+    Ok(source_map.insert(source_file))
 }
 
 /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
@@ -961,6 +1012,30 @@ impl CommentCmd {
     }
 }
 
+/// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) FILE start.
+/// [MPD Extension[(https://www.ldraw.org/article/47.html)
+#[derive(Debug, PartialEq, Clone)]
+pub struct FileCmd {
+    /// The filename for this file.
+    pub file: String,
+}
+
+/// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) DATA.
+/// [MPD Extension[(https://www.ldraw.org/article/47.html)
+#[derive(Debug, PartialEq, Clone)]
+pub struct DataCmd {
+    /// The filename for this data file.
+    pub file: String,
+}
+
+/// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) base64 data chunk.
+/// [MPD Extension[(https://www.ldraw.org/article/47.html)
+#[derive(Debug, PartialEq, Clone)]
+pub struct Base64DataCmd {
+    /// The decoded base64 data chunk.
+    pub data: Vec<u8>,
+}
+
 /// Single LDraw source file loaded and optionally parsed.
 #[derive(Debug, PartialEq, Clone)]
 pub struct SourceFile {
@@ -997,16 +1072,30 @@ impl SourceMap {
     }
 
     /// Inserts a new source file into the collection.
-    pub fn insert(&mut self, source_file: SourceFile) -> Option<SourceFile> {
-        self.source_files
-            .insert(source_file.filename.clone(), source_file)
+    /// Returns a copy of `source_file` or the main file for multi-part documents (MPD).
+    pub fn insert(&mut self, source_file: SourceFile) -> SourceFile {
+        // The MPD extension allows .ldr or .mpd files to contain multiple files.
+        // Add each of these so that they can be resolved by subfile commands later.
+        let files = split_files(&source_file.cmds);
+
+        if files.is_empty() {
+            // TODO: More cleanly handle the fact that not all files have 0 FILE commands.
+            self.source_files
+                .insert(source_file.filename.clone(), source_file.clone());
+            source_file
+        } else {
+            // The first block is the "main model" of the file.
+            let root_file = files[0].clone();
+            for file in files {
+                self.source_files.insert(file.filename.clone(), file);
+            }
+            root_file
+        }
     }
 
-    // TODO: How to modify this code to support mpd files?
-    // TODO: Files can be relative to the current file directory.
-    // TODO: Should the resolver take the path of the file containing the reference to support the above?
-    fn queue_subfiles(&mut self, source_file: &SourceFile, queue: &mut Vec<QueuedFileRef>) {
+    fn queue_subfiles(&self, source_file: &SourceFile, stack: &mut Vec<FileRef>) {
         let referer_filename = source_file.filename.clone();
+
         for cmd in &source_file.cmds {
             if let Command::SubFileRef(sfr_cmd) = cmd {
                 // Queue this file for loading if we haven't already.
@@ -1016,7 +1105,7 @@ impl SourceMap {
                         referer_filename,
                         sfr_cmd.file
                     );
-                    queue.push(QueuedFileRef {
+                    stack.push(FileRef {
                         filename: sfr_cmd.file.clone(),
                         referer_filename: referer_filename.clone(),
                     });
@@ -1026,14 +1115,44 @@ impl SourceMap {
     }
 }
 
+fn split_files(commands: &[Command]) -> Vec<SourceFile> {
+    commands
+        .iter()
+        .enumerate()
+        .filter_map(|(i, c)| match c {
+            Command::File(file_cmd) => Some((i, file_cmd)),
+            _ => None,
+        })
+        .map(|(file_start, file_cmd)| {
+            // Each file block starts with a FILE command.
+            // The block continues until the next NOFILE or FILE command.
+            // TODO: Is there a cleaner way of expressing this?
+            let subfile = &commands[file_start..];
+            // Start from 1 to ignore the current file command.
+            let subfile_end = subfile
+                .iter()
+                .skip(1)
+                .position(|c| matches!(c, Command::File(_) | Command::NoFile));
+            let subfile_cmds = if let Some(subfile_end) = subfile_end {
+                // Add one here since we skip the first FILE command.
+                subfile[..subfile_end + 1].to_vec()
+            } else {
+                subfile.to_vec()
+            };
+            SourceFile {
+                filename: file_cmd.file.clone(),
+                cmds: subfile_cmds,
+            }
+        })
+        .collect()
+}
+
 impl Default for SourceMap {
     fn default() -> Self {
         Self::new()
     }
 }
 
-// TODO: Adjust wording to make clear that this is the name of an external file.
-// TODO: Resolvers should also check the current directory of the file containing the ref?
 /// [Line Type 1](https://www.ldraw.org/article/218.html#lt1) LDraw command:
 /// Reference a sub-file from the current file.
 #[derive(Debug, PartialEq, Clone)]
@@ -1107,6 +1226,18 @@ pub enum Command {
     /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
     /// [!COLOUR language extension](https://www.ldraw.org/article/299.html).
     Colour(ColourCmd),
+    /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
+    /// [MPD language extension](https://www.ldraw.org/article/47.html).
+    File(FileCmd),
+    /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
+    /// [MPD language extension](https://www.ldraw.org/article/47.html).
+    NoFile,
+    /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
+    /// [MPD language extension](https://www.ldraw.org/article/47.html).
+    Data(DataCmd),
+    /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
+    /// [MPD language extension](https://www.ldraw.org/article/47.html).
+    Base64Data(Base64DataCmd),
     /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) comment.
     /// Note: any line type 0 not otherwise parsed as a known meta-command is parsed as a generic comment.
     Comment(CommentCmd),
@@ -1140,7 +1271,6 @@ pub trait FileRefResolver {
     /// Unix style `\n` or Windows style `\r\n`.
     ///
     /// See [`parse()`] for usage.
-    // TODO: Make this return AsRef<[u8]> so that implementations are free to cache?
     fn resolve(&self, filename: &str) -> Result<Vec<u8>, ResolveError>;
 }
 
@@ -1868,6 +1998,165 @@ mod tests {
             read_line(b"1 16 0 0 0 1 0 0 0 1 0 0 0 1 aa/aaaaddd"),
             Ok((&b""[..], res))
         );
+    }
+
+    #[test]
+    fn test_meta_data() {
+        let res = Command::Data(DataCmd {
+            file: "data.bin".to_string(),
+        });
+        assert_eq!(read_line(b"0 !DATA data.bin"), Ok((&b""[..], res)));
+    }
+
+    #[test]
+    fn test_base64_data() {
+        let res = Command::Base64Data(Base64DataCmd {
+            data: b"Hello World!".to_vec(),
+        });
+        assert_eq!(read_line(b"0 !: SGVsbG8gV29ybGQh"), Ok((&b""[..], res)));
+    }
+
+    #[test]
+    fn test_file_cmd() {
+        let res = Command::File(FileCmd {
+            file: "submodel".to_string(),
+        });
+        assert_eq!(meta_cmd(b"FILE submodel"), Ok((&b""[..], res)));
+    }
+
+    #[test]
+    fn test_nofile_cmd() {
+        let res = Command::NoFile;
+        assert_eq!(meta_cmd(b"NOFILE"), Ok((&b""[..], res)));
+    }
+
+    #[test]
+    fn test_split_mpd_files() {
+        let commands = vec![
+            Command::File(FileCmd {
+                file: "a".to_string(),
+            }),
+            Command::SubFileRef(SubFileRefCmd {
+                color: 16,
+                pos: Vec3::new(0.0, 0.0, 0.0),
+                row0: Vec3::new(1.0, 0.0, 0.0),
+                row1: Vec3::new(0.0, 1.0, 0.0),
+                row2: Vec3::new(0.0, 0.0, 1.0),
+                file: "1.dat".to_string(),
+            }),
+            Command::NoFile,
+            Command::File(FileCmd {
+                file: "b".to_string(),
+            }),
+            Command::SubFileRef(SubFileRefCmd {
+                color: 16,
+                pos: Vec3::new(0.0, 0.0, 0.0),
+                row0: Vec3::new(1.0, 0.0, 0.0),
+                row1: Vec3::new(0.0, 1.0, 0.0),
+                row2: Vec3::new(0.0, 0.0, 1.0),
+                file: "2.dat".to_string(),
+            }),
+            Command::NoFile,
+        ];
+        let subfiles = split_files(&commands);
+        assert_eq!(
+            vec![
+                SourceFile {
+                    filename: "a".to_string(),
+                    cmds: commands[0..2].to_vec()
+                },
+                SourceFile {
+                    filename: "b".to_string(),
+                    cmds: commands[3..5].to_vec()
+                }
+            ],
+            subfiles
+        );
+    }
+
+    #[test]
+    fn test_split_mpd_files_just_file_commands() {
+        let commands = vec![
+            Command::File(FileCmd {
+                file: "a".to_string(),
+            }),
+            Command::SubFileRef(SubFileRefCmd {
+                color: 16,
+                pos: Vec3::new(0.0, 0.0, 0.0),
+                row0: Vec3::new(1.0, 0.0, 0.0),
+                row1: Vec3::new(0.0, 1.0, 0.0),
+                row2: Vec3::new(0.0, 0.0, 1.0),
+                file: "1.dat".to_string(),
+            }),
+            Command::File(FileCmd {
+                file: "b".to_string(),
+            }),
+            Command::SubFileRef(SubFileRefCmd {
+                color: 16,
+                pos: Vec3::new(0.0, 0.0, 0.0),
+                row0: Vec3::new(1.0, 0.0, 0.0),
+                row1: Vec3::new(0.0, 1.0, 0.0),
+                row2: Vec3::new(0.0, 0.0, 1.0),
+                file: "2.dat".to_string(),
+            }),
+        ];
+
+        let subfiles = split_files(&commands);
+        assert_eq!(
+            vec![
+                SourceFile {
+                    filename: "a".to_string(),
+                    cmds: commands[0..2].to_vec()
+                },
+                SourceFile {
+                    filename: "b".to_string(),
+                    cmds: commands[2..].to_vec()
+                }
+            ],
+            subfiles
+        );
+    }
+
+    #[test]
+    fn test_parse_raw_mpd() {
+        // Test various language extensions.
+        // Example taken from https://www.ldraw.org/article/47.html
+        let ldr_contents = b"0 FILE main.ldr
+        1 7 0 0 0 1 0 0 0 1 0 0 0 1 819.dat
+        1 4 80 -8 70 1 0 0 0 1 0 0 0 1 house.ldr
+        1 4 -70 -8 20 0 0 -1 0 1 0 1 0 0 house.ldr
+        1 4 50 -8 -20 0 0 -1 0 1 0 1 0 0 house.ldr
+        1 4 0 -8 -30 1 0 0 0 1 0 0 0 1 house.ldr
+        1 4 -20 -8 70 1 0 0 0 1 0 0 0 1 house.ldr
+        
+        0 FILE house.ldr
+        1 16 0 0 0 1 0 0 0 1 0 0 0 1 3023.dat
+        1 16 0 -24 0 1 0 0 0 1 0 0 0 1 3065.dat
+        1 16 0 -48 0 1 0 0 0 1 0 0 0 1 3065.dat
+        1 16 0 -72 0 0 0 -1 0 1 0 1 0 0 3044b.dat
+        1 4 0 -22 -10 1 0 0 0 0 -1 0 1 0 sticker.ldr
+        
+        0 FILE sticker.ldr
+        0 UNOFFICIAL PART
+        0 BFC CERTIFY CCW
+        1 16   0 -0.25 0   20 0 0   0 0.25 0   0 0 30   box5.dat
+        0 !TEXMAP START PLANAR   -20 -0.25 30   20 -0.25 30   -20 -0.25 -30   sticker.png
+        4 16   -20 -0.25 30   -20 -0.25 -30   20 -0.25 -30   20 -0.25 30
+        0 !TEXMAP END
+        
+        0 !DATA sticker.png
+        0 !: iVBORw0KGgoAAAANSUhEUgAAAFAAAAB4CAIAAADqjOKhAAAAAXNSR0IArs4c6QAAAARnQU1BAACx
+        0 !: jwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAEUSURBVHhe7du9DcIwFABhk5WgQLSsQM0UjMEU
+        0 !: 1BQsQIsoYAt6NkAYxQV/JQ7WvfuKkFTR6UmOFJzR9bJLkXTlNwyD6QymM5ju5Tl8m67KGUt3XJcz
+        0 !: J/yY8HZ/6C8BFvNZPoaesMF0BtMZTGcwncF0BtMZTGcwncF0BtMZTGcwnf8t0bmLh85gOoPpDKYz
+        0 !: mM5gOoPpDKYzmM5gunDBf3tN+/zqNKt367cbOeGUTstxf1nJZHPOx68T/u3XB5/7/zMXLTqD6Qym
+        0 !: M5jOYDqD6QymM5jOYDqD6QymM5jOYDqD6QymM5jOYLpwwW3t8ajBXTxtTHgwLlp0BtMZTGcwncF0
+        0 !: BtMZTNfKZzyDiT3hCFy06IIFp3QH/CBMh66aBy4AAAAASUVORK5CYII=
+        ";
+
+        let commands = parse_raw(ldr_contents).unwrap();
+        // TODO: Check the actual commands.
+        assert_eq!(28, commands.len());
     }
 
     #[test]
