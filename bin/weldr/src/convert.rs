@@ -106,16 +106,14 @@ impl ConvertCommand {
     fn add_nodes(
         &self,
         source_file: &weldr::SourceFile,
-        transform: weldr::Mat4,
+        transform: Option<weldr::Mat4>,
         source_map: &weldr::SourceMap,
         gltf: &mut gltf::Gltf,
         buffer: &mut Vec<u8>,
-        mesh_cache: &mut HashMap<String, Option<usize>>,
+        mesh_cache: &mut HashMap<String, Option<u32>>,
     ) -> u32 {
-        let matrix = if transform == weldr::Mat4::from_scale(1.0) {
-            None
-        } else {
-            Some([
+        let matrix = transform.map(|transform| {
+            [
                 transform.x.x,
                 transform.x.y,
                 transform.x.z,
@@ -132,8 +130,8 @@ impl ConvertCommand {
                 transform.w.y,
                 transform.w.z,
                 transform.w.w,
-            ])
-        };
+            ]
+        });
 
         let node_index = gltf.nodes.len();
         let node = gltf::Node {
@@ -150,7 +148,7 @@ impl ConvertCommand {
             let mesh_index = mesh_cache
                 .entry(source_file.filename.clone())
                 .or_insert_with(|| {
-                    let mesh_index = gltf.meshes.len();
+                    let mesh_index = gltf.meshes.len() as u32;
                     let geometry = self.create_geometry(source_file, source_map);
                     // Don't set empty meshes to avoid import errors.
                     if !geometry.vertices.is_empty() && !geometry.triangle_indices.is_empty() {
@@ -161,7 +159,7 @@ impl ConvertCommand {
                     }
                 });
 
-            gltf.nodes[node_index].mesh_index = mesh_index.map(|i| i as u32);
+            gltf.nodes[node_index].mesh_index = *mesh_index;
         } else {
             for cmd in &source_file.cmds {
                 if let Command::SubFileRef(sfr_cmd) = cmd {
@@ -175,8 +173,14 @@ impl ConvertCommand {
                             weldr::Vec4::new(sfr_cmd.pos.x, sfr_cmd.pos.y, sfr_cmd.pos.z, 1.0),
                         );
 
-                        let child_node_index = self
-                            .add_nodes(subfile, transform, source_map, gltf, buffer, mesh_cache);
+                        let child_node_index = self.add_nodes(
+                            subfile,
+                            Some(transform),
+                            source_map,
+                            gltf,
+                            buffer,
+                            mesh_cache,
+                        );
                         gltf.nodes[node_index].children.push(child_node_index);
                     }
                 }
@@ -222,7 +226,7 @@ impl ConvertCommand {
         // Recursively add a node for each file.
         self.add_nodes(
             source_file,
-            weldr::Mat4::from_scale(1.0),
+            None,
             source_map,
             &mut gltf,
             &mut buffer,
