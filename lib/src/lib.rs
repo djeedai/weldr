@@ -73,7 +73,7 @@ use nom::{
     bytes::complete::{tag, tag_no_case, take_while, take_while1, take_while_m_n},
     character::{
         complete::{digit1, line_ending as eol},
-        is_alphanumeric, is_digit,
+        is_digit,
     },
     combinator::{complete, map, map_res, opt},
     error::ErrorKind,
@@ -196,6 +196,9 @@ fn keywords(i: &[u8]) -> IResult<&[u8], Command> {
         }),
     ))
 }
+
+// Special color code that "inherits" the existing color.
+const CURRENT_COLOR: u32 = 16;
 
 /// RGB color in sRGB color space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -473,16 +476,6 @@ fn color_id(i: &[u8]) -> IResult<&[u8], u32> {
     map_res(map_res(digit1, str::from_utf8), str::parse::<u32>)(i)
 }
 
-#[inline]
-fn is_filename_char(chr: u8) -> bool {
-    is_alphanumeric(chr) || chr == b'/' || chr == b'\\' || chr == b'.' || chr == b'-'
-}
-
-fn filename_char(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    // TODO - Split at EOL instead and accept all characters for filename?
-    i.split_at_position1_complete(|item| !is_filename_char(item), ErrorKind::AlphaNumeric)
-}
-
 fn filename(i: &[u8]) -> IResult<&[u8], &str> {
     // Assume leading and trailing whitespace isn't part of the filename.
     map(map_res(take_not_cr_or_lf, str::from_utf8), |s| s.trim())(i)
@@ -738,7 +731,7 @@ impl SourceFile {
     pub fn iter<'a>(&'a self, source_map: &'a SourceMap) -> CommandIterator<'a> {
         let draw_ctx = DrawContext {
             transform: Mat4::from_scale(1.0),
-            color: 16,
+            color: CURRENT_COLOR,
         };
         CommandIterator {
             stack: vec![(self, 0, draw_ctx)],
@@ -775,9 +768,14 @@ impl<'a> Iterator for CommandIterator<'a> {
                             Vec4::new(sfr_cmd.row0.z, sfr_cmd.row1.z, sfr_cmd.row2.z, 0.0),
                             Vec4::new(sfr_cmd.pos.x, sfr_cmd.pos.y, sfr_cmd.pos.z, 1.0),
                         );
+                        // Accumulate transforms and replace colors.
                         let draw_ctx = DrawContext {
                             transform: draw_ctx.transform * local_transform,
-                            color: 16,
+                            color: if sfr_cmd.color == CURRENT_COLOR {
+                                draw_ctx.color
+                            } else {
+                                sfr_cmd.color
+                            },
                         };
                         self.stack.push((source_file, 0, draw_ctx));
                         continue;
