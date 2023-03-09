@@ -112,26 +112,7 @@ impl ConvertCommand {
         buffer: &mut Vec<u8>,
         mesh_cache: &mut HashMap<String, Option<u32>>,
     ) -> u32 {
-        let matrix = transform.map(|transform| {
-            [
-                transform.x.x,
-                transform.x.y,
-                transform.x.z,
-                transform.x.w,
-                transform.y.x,
-                transform.y.y,
-                transform.y.z,
-                transform.y.w,
-                transform.z.x,
-                transform.z.y,
-                transform.z.z,
-                transform.z.w,
-                transform.w.x,
-                transform.w.y,
-                transform.w.z,
-                transform.w.w,
-            ]
-        });
+        let matrix = transform.map(|m| m.to_cols_array());
 
         let node_index = gltf.nodes.len();
         let node = gltf::Node {
@@ -166,12 +147,7 @@ impl ConvertCommand {
                     if let Some(subfile) = source_map.get(&sfr_cmd.file) {
                         // Don't apply node transforms to preserve the scene hierarchy.
                         // Applications should handle combining the transforms.
-                        let transform = weldr::Mat4::from_cols(
-                            weldr::Vec4::new(sfr_cmd.row0.x, sfr_cmd.row1.x, sfr_cmd.row2.x, 0.0),
-                            weldr::Vec4::new(sfr_cmd.row0.y, sfr_cmd.row1.y, sfr_cmd.row2.y, 0.0),
-                            weldr::Vec4::new(sfr_cmd.row0.z, sfr_cmd.row1.z, sfr_cmd.row2.z, 0.0),
-                            weldr::Vec4::new(sfr_cmd.pos.x, sfr_cmd.pos.y, sfr_cmd.pos.z, 1.0),
-                        );
+                        let transform = sfr_cmd.matrix();
 
                         let child_node_index = self.add_nodes(
                             subfile,
@@ -430,7 +406,7 @@ impl Action for ConvertCommand {
         let root_file = source_map.get(&main_model_name).unwrap();
 
         match self.format {
-            ConvertFormat::Gltf => self.write_gltf(&root_file, &source_map),
+            ConvertFormat::Gltf => self.write_gltf(root_file, &source_map),
         }
     }
 }

@@ -84,15 +84,7 @@ use nom::{
 };
 use std::{collections::HashMap, str};
 
-pub type Vec3 = cgmath::Vector3<f32>;
-pub type Vec4 = cgmath::Vector4<f32>;
-pub type Mat4 = cgmath::Matrix4<f32>;
-
-#[cfg(feature = "cgmath")]
-pub type Vec4 = cgmath::Vector4<f32>;
-
-#[cfg(feature = "cgmath")]
-pub type Mat4 = cgmath::Matrix4<f32>;
+pub use glam::{Mat4, Vec3, Vec4};
 
 pub mod error;
 
@@ -686,7 +678,7 @@ pub struct DrawContext {
     /// by transforming the local-space positions of the drawing command by this transformation matrix.
     ///
     /// ```rustc,ignore
-    /// let v0 = draw_ctx.transform * cmd.vertices[0];
+    /// let v0 = draw_ctx.transform.transform_point3(cmd.vertices[0]);
     /// ```
     pub transform: Mat4,
 
@@ -730,7 +722,7 @@ impl SourceFile {
     /// without returning the corresponding [`SubFileRefCmd`] command nor any comment command.
     pub fn iter<'a>(&'a self, source_map: &'a SourceMap) -> CommandIterator<'a> {
         let draw_ctx = DrawContext {
-            transform: Mat4::from_scale(1.0),
+            transform: Mat4::IDENTITY,
             color: CURRENT_COLOR,
         };
         CommandIterator {
@@ -762,12 +754,7 @@ impl<'a> Iterator for CommandIterator<'a> {
                 *index += 1;
                 if let Command::SubFileRef(sfr_cmd) = &cmd {
                     if let Some(source_file) = self.source_map.get(&sfr_cmd.file) {
-                        let local_transform = Mat4::from_cols(
-                            Vec4::new(sfr_cmd.row0.x, sfr_cmd.row1.x, sfr_cmd.row2.x, 0.0),
-                            Vec4::new(sfr_cmd.row0.y, sfr_cmd.row1.y, sfr_cmd.row2.y, 0.0),
-                            Vec4::new(sfr_cmd.row0.z, sfr_cmd.row1.z, sfr_cmd.row2.z, 0.0),
-                            Vec4::new(sfr_cmd.pos.x, sfr_cmd.pos.y, sfr_cmd.pos.z, 1.0),
-                        );
+                        let local_transform = sfr_cmd.matrix();
                         // Accumulate transforms and replace colors.
                         let draw_ctx = DrawContext {
                             transform: draw_ctx.transform * local_transform,
@@ -1267,6 +1254,19 @@ pub trait FileRefResolver {
     ///
     /// See [`parse()`] for usage.
     fn resolve(&self, filename: &str) -> Result<Vec<u8>, ResolveError>;
+}
+
+impl SubFileRefCmd {
+    /// Get the 4x4 transformation matrix applied to the subfile.
+    pub fn matrix(&self) -> Mat4 {
+        Mat4::from_cols(
+            self.row0.extend(self.pos.x),
+            self.row1.extend(self.pos.y),
+            self.row2.extend(self.pos.z),
+            Vec4::new(0.0, 0.0, 0.0, 1.0),
+        )
+        .transpose()
+    }
 }
 
 #[cfg(test)]

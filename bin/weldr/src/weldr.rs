@@ -24,7 +24,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use structopt::StructOpt;
-use weldr::{DrawContext, FileRefResolver, Mat4, ResolveError, Vec3, Vec4};
+use weldr::{DrawContext, FileRefResolver, Mat4, ResolveError, Vec3};
 
 #[derive(Debug, StructOpt)]
 pub(crate) struct LoggerConfig {
@@ -301,8 +301,7 @@ impl GeometryCache {
 
     /// Insert a new vertex and return its index.
     fn insert_vertex(&mut self, vec: &Vec3, transform: &Mat4) -> u32 {
-        let vec4 = Vec4::new(vec.x, vec.y, vec.z, 1.0);
-        let vec = (transform * vec4).truncate();
+        let vec = transform.transform_point3(*vec);
         match self.vertex_map.get(&vec.into()) {
             Some(index) => *index,
             None => {
@@ -531,21 +530,21 @@ mod tests {
     fn test_geocache_insert() {
         let mut geo = GeometryCache::new();
         // First vertex always inserts
-        let index = geo.insert_vertex(&Vec3::new(0.0, 1.0, 2.0), &Mat4::from_scale(1.0));
+        let index = geo.insert_vertex(&Vec3::new(0.0, 1.0, 2.0), &Mat4::IDENTITY);
         assert_eq!(0, index);
         assert_eq!(1, geo.vertex_map.len());
         assert_eq!(1, geo.vertices.len());
         assert_eq!(0, geo.line_indices.len());
         assert_eq!(0, geo.triangle_indices.len());
         // Duplicate vertex
-        let index = geo.insert_vertex(&Vec3::new(0.0, 1.0, 2.0), &Mat4::from_scale(1.0));
+        let index = geo.insert_vertex(&Vec3::new(0.0, 1.0, 2.0), &Mat4::IDENTITY);
         assert_eq!(0, index);
         assert_eq!(1, geo.vertex_map.len());
         assert_eq!(1, geo.vertices.len());
         assert_eq!(0, geo.line_indices.len());
         assert_eq!(0, geo.triangle_indices.len());
         // New unique vertex
-        let index = geo.insert_vertex(&Vec3::new(-5.0, 1.0, 2.0), &Mat4::from_scale(1.0));
+        let index = geo.insert_vertex(&Vec3::new(-5.0, 1.0, 2.0), &Mat4::IDENTITY);
         assert_eq!(1, index);
         assert_eq!(2, geo.vertices.len());
         assert_eq!(2, geo.vertex_map.len());
@@ -557,7 +556,7 @@ mod tests {
     fn test_geocache_add_line() {
         let mut geo = GeometryCache::new();
         let draw_ctx = DrawContext {
-            transform: Mat4::from_scale(1.0),
+            transform: Mat4::IDENTITY,
             color: 16,
         };
         geo.add_line(
@@ -574,7 +573,7 @@ mod tests {
     fn test_geocache_add_triangle() {
         let mut geo = GeometryCache::new();
         let draw_ctx = DrawContext {
-            transform: Mat4::from_scale(1.0),
+            transform: Mat4::IDENTITY,
             color: 16,
         };
         geo.add_triangle(
@@ -595,7 +594,7 @@ mod tests {
     fn test_geocache_add_quad() {
         let mut geo = GeometryCache::new();
         let draw_ctx = DrawContext {
-            transform: Mat4::from_scale(1.0),
+            transform: Mat4::IDENTITY,
             color: 16,
         };
         geo.add_quad(
