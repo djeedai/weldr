@@ -18,7 +18,6 @@ use error::Error;
 use ansi_term::Color::{Blue, Purple, Red, Yellow};
 use log::{Metadata, Record};
 use ordered_float::NotNan;
-use path_slash::PathBufExt;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -193,7 +192,6 @@ impl DiskResolver {
             .map_err(|e| Error::NotFound(format!("catalog path not found ({})", e)))?;
         let base_paths = vec![
             catalog_path.join("p"),
-            catalog_path.join("p").join("48"),
             catalog_path.join("parts"),
             catalog_path.join("parts").join("s"),
         ];
@@ -223,17 +221,15 @@ impl DiskResolver {
 
 impl FileRefResolver for DiskResolver {
     fn resolve(&self, filename: &str) -> Result<Vec<u8>, ResolveError> {
-        // TODO: This doesn't work with relative paths as the main ldr path?
         self.base_paths
             .iter()
             .find_map(|prefix| {
-                // The file's path separator may not match the current OS.
-                // Don't assume the current file system and try both separators.
-                let forward_path = prefix.join(PathBuf::from_slash(filename));
-                let backward_path = prefix.join(PathBuf::from_backslash(filename));
-                std::fs::read(prefix.join(forward_path))
-                    .or_else(|_| std::fs::read(prefix.join(backward_path)))
-                    .ok()
+                // LDraw files can contain forward or backward slashes.
+                // Normalize to match the current operating system.
+                let normalized_path: PathBuf = Path::new(&filename.replace("\\", "/"))
+                    .components()
+                    .collect();
+                std::fs::read(prefix.join(normalized_path)).ok()
             })
             .ok_or(ResolveError::new(
                 filename.to_string(),
