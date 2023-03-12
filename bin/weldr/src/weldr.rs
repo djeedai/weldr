@@ -430,7 +430,6 @@ mod tests {
         let test_folder = testutils::setup_test_folder("disk_resolver_new_from_catalog");
         let paths = [
             test_folder.path().join("p"),
-            test_folder.path().join("p").join("48"),
             test_folder.path().join("parts"),
             test_folder.path().join("parts").join("s"),
             test_folder.path().join("extra"),
@@ -440,7 +439,7 @@ mod tests {
         }
         let mut resolver = DiskResolver::new_from_catalog(test_folder.path()).unwrap();
         resolver.add_path(test_folder.path().join("extra")).unwrap();
-        assert_eq!(5, resolver.base_paths.len());
+        assert_eq!(4, resolver.base_paths.len());
         for path in &paths {
             assert!(resolver.base_paths.iter().any(|p| p == path));
         }
