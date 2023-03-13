@@ -224,6 +224,7 @@ impl FileRefResolver for DiskResolver {
         self.base_paths
             .iter()
             .find_map(|prefix| std::fs::read(prefix.join(filename.as_ref())).ok())
+            .or_else(|| std::fs::read(filename.as_ref()).ok())
             .ok_or(ResolveError::new(
                 filename.as_ref().to_string_lossy().to_string(),
                 std::io::Error::from(std::io::ErrorKind::NotFound),
