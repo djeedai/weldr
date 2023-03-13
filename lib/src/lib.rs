@@ -124,8 +124,6 @@ pub fn parse_raw(ldr_content: &[u8]) -> Result<Vec<Command>, Error> {
 struct FileRef {
     /// Filename of unresolved source file.
     filename: String,
-    /// Referer source file which requested the resolution.
-    referer_filename: String,
 }
 
 /// Drawing context used when iterating over all drawing commands of a file via [`SourceFile::iter()`].
@@ -261,15 +259,9 @@ fn load_and_parse_single_file<P: AsRef<Path>, R: FileRefResolver>(
     filename: P,
     resolver: &R,
 ) -> Result<SourceFile, Error> {
-    // We should never have "unparsed" source files.
-    // Caching only is always keyed by filenames anyway.
-    let filename_text = filename.as_ref().to_string_lossy().to_string();
     let raw_content = resolver.resolve(filename)?;
     let cmds = parse::parse_raw(&raw_content)?;
-    Ok(SourceFile {
-        filename: filename_text,
-        cmds,
-    })
+    Ok(SourceFile { cmds })
 }
 
 /// Parse a single file and its sub-file references recursively.
@@ -295,7 +287,6 @@ fn load_and_parse_single_file<P: AsRef<Path>, R: FileRefResolver>(
 ///   let mut source_map = SourceMap::new();
 ///   let main_model_name = parse("root.ldr", &resolver, &mut source_map)?;
 ///   let root_file = source_map.get(&main_model_name).unwrap();
-///   assert_eq!(root_file.filename, "root.ldr");
 ///   Ok(())
 /// }
 /// ```
@@ -310,7 +301,8 @@ pub fn parse<P: AsRef<Path>, R: FileRefResolver>(
     debug!("Processing root file '{:?}'", path.as_ref());
     // The provided path should refer to a file from the resolver.
     // Use the path directly without any normalization.
-    let actual_root = load_file(path, resolver, source_map, &mut stack)?;
+    let filename = path.as_ref().to_string_lossy().to_string();
+    let actual_root = load_file(path, &filename, resolver, source_map, &mut stack)?;
 
     // Recursively load files referenced by the root file.
     while let Some(file) = stack.pop() {
@@ -321,7 +313,7 @@ pub fn parse<P: AsRef<Path>, R: FileRefResolver>(
             None => {
                 trace!("Not yet parsed; parsing sub-file: {}", filename);
                 // Normalize file references to subfiles.
-                let subfile_ref = SubFileRef::new(&filename);
+                let subfile_ref = SubFileRef::new(filename);
                 load_subfile(subfile_ref, resolver, source_map, &mut stack)?;
             }
         }
@@ -331,14 +323,15 @@ pub fn parse<P: AsRef<Path>, R: FileRefResolver>(
 }
 
 fn load_file<P: AsRef<Path>, R: FileRefResolver>(
-    filename: P,
+    path: P,
+    filename: &str,
     resolver: &R,
     source_map: &mut SourceMap,
     stack: &mut Vec<FileRef>,
 ) -> Result<String, Error> {
-    let source_file = load_and_parse_single_file(filename, resolver)?;
+    let source_file = load_and_parse_single_file(path, resolver)?;
     source_map.queue_subfiles(&source_file, stack);
-    Ok(source_map.insert(source_file))
+    Ok(source_map.insert(filename, source_file))
 }
 
 fn load_subfile<R: FileRefResolver>(
@@ -347,7 +340,7 @@ fn load_subfile<R: FileRefResolver>(
     source_map: &mut SourceMap,
     stack: &mut Vec<FileRef>,
 ) -> Result<String, Error> {
-    load_file(filename.0, resolver, source_map, stack)
+    load_file(&filename.0, &filename.0, resolver, source_map, stack)
 }
 
 /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
@@ -487,12 +480,9 @@ pub struct Base64DataCmd {
     pub data: Vec<u8>,
 }
 
-/// Single LDraw source file loaded and optionally parsed.
+/// The commands for a single LDraw source file.
 #[derive(Debug, PartialEq, Clone)]
 pub struct SourceFile {
-    /// The relative filename of the file as resolved.
-    // TODO: This can be removed.
-    pub filename: String,
     /// LDraw commands parsed from the raw text content of the file.
     pub cmds: Vec<Command>,
 }
@@ -511,7 +501,7 @@ fn normalize_subfile_reference(s: &str) -> String {
     // This also includes references to MPD subfiles.
     // Normalize paths to lowercase and forward slashes.
     // The official parts library can be assumed to use lowercase.
-    s.to_lowercase().replace("\\", "/")
+    s.to_lowercase().replace('\\', "/").replace("//", "/")
 }
 
 /// Collection of [`SourceFile`] accessible from their reference filename.
@@ -543,7 +533,7 @@ impl SourceMap {
     /// Inserts a new source file into the collection.
     /// Returns a copy of the filename of `source_file`
     /// or the filename of the main file for multi-part documents (MPD).
-    pub fn insert(&mut self, source_file: SourceFile) -> String {
+    pub fn insert(&mut self, filename: &str, source_file: SourceFile) -> String {
         // The MPD extension allows .ldr or .mpd files to contain multiple files.
         // Add each of these so that they can be resolved by subfile commands later.
         let files = split_mpd_file(&source_file.cmds);
@@ -551,34 +541,26 @@ impl SourceMap {
         if files.is_empty() {
             // TODO: More cleanly handle the fact that not all files have 0 FILE commands.
             self.source_files
-                .insert(SubFileRef::new(&source_file.filename), source_file.clone());
-            source_file.filename
+                .insert(SubFileRef::new(filename), source_file);
+            filename.to_string()
         } else {
             // The first block is the "main model" of the file.
-            let main_model_name = files[0].filename.clone();
-            for file in files {
-                self.source_files
-                    .insert(SubFileRef::new(&file.filename), file);
+            let main_model_name = files[0].0.clone();
+            for (name, file) in files {
+                self.source_files.insert(SubFileRef::new(&name), file);
             }
             main_model_name
         }
     }
 
     fn queue_subfiles(&self, source_file: &SourceFile, stack: &mut Vec<FileRef>) {
-        let referer_filename = source_file.filename.clone();
-
         for cmd in &source_file.cmds {
             if let Command::SubFileRef(sfr_cmd) = cmd {
                 // Queue this file for loading if we haven't already.
                 if self.get(&sfr_cmd.file).is_none() {
-                    trace!(
-                        "Queuing unresolved subfile ref in {} -> {}",
-                        referer_filename,
-                        sfr_cmd.file
-                    );
+                    trace!("Queuing unresolved subfile ref {}", sfr_cmd.file);
                     stack.push(FileRef {
                         filename: sfr_cmd.file.clone(),
-                        referer_filename: referer_filename.clone(),
                     });
                 }
             }
@@ -586,9 +568,8 @@ impl SourceMap {
     }
 }
 
-fn split_mpd_file(commands: &[Command]) -> Vec<SourceFile> {
-    commands
-        .iter()
+fn split_mpd_file(cmds: &[Command]) -> Vec<(String, SourceFile)> {
+    cmds.iter()
         .enumerate()
         .filter_map(|(i, c)| match c {
             Command::File(file_cmd) => Some((i, file_cmd)),
@@ -598,7 +579,7 @@ fn split_mpd_file(commands: &[Command]) -> Vec<SourceFile> {
             // Each file block starts with a FILE command.
             // The block continues until the next NOFILE or FILE command.
             // TODO: Is there a cleaner way of expressing this?
-            let subfile = &commands[file_start..];
+            let subfile = &cmds[file_start..];
             // Start from 1 to ignore the current file command.
             let subfile_end = subfile
                 .iter()
@@ -610,10 +591,7 @@ fn split_mpd_file(commands: &[Command]) -> Vec<SourceFile> {
             } else {
                 subfile.to_vec()
             };
-            SourceFile {
-                filename: file_cmd.file.clone(),
-                cmds: subfile_cmds,
-            }
+            (file_cmd.file.clone(), SourceFile { cmds: subfile_cmds })
         })
         .collect()
 }
@@ -793,14 +771,18 @@ mod tests {
         let subfiles = split_mpd_file(&commands);
         assert_eq!(
             vec![
-                SourceFile {
-                    filename: "a".to_string(),
-                    cmds: commands[0..2].to_vec()
-                },
-                SourceFile {
-                    filename: "b".to_string(),
-                    cmds: commands[3..5].to_vec()
-                }
+                (
+                    "a".to_string(),
+                    SourceFile {
+                        cmds: commands[0..2].to_vec()
+                    }
+                ),
+                (
+                    "b".to_string(),
+                    SourceFile {
+                        cmds: commands[3..5].to_vec()
+                    }
+                )
             ],
             subfiles
         );
@@ -836,14 +818,18 @@ mod tests {
         let subfiles = split_mpd_file(&commands);
         assert_eq!(
             vec![
-                SourceFile {
-                    filename: "a".to_string(),
-                    cmds: commands[0..2].to_vec()
-                },
-                SourceFile {
-                    filename: "b".to_string(),
-                    cmds: commands[2..].to_vec()
-                }
+                (
+                    "a".to_string(),
+                    SourceFile {
+                        cmds: commands[0..2].to_vec()
+                    }
+                ),
+                (
+                    "b".to_string(),
+                    SourceFile {
+                        cmds: commands[2..].to_vec()
+                    }
+                )
             ],
             subfiles
         );
@@ -961,10 +947,22 @@ mod tests {
     }
 
     #[test]
+    fn test_source_map_normalization() {
+        let mut source_map = SourceMap::new();
+        source_map.insert("p\\part.dat", SourceFile { cmds: Vec::new() });
+        assert!(source_map.get("p/part.DAT").is_some());
+
+        source_map.insert("TEST.LDR", SourceFile { cmds: Vec::new() });
+        assert!(source_map.get("test.LDR").is_some());
+
+        source_map.insert("a//b\\\\c//d.dat", SourceFile { cmds: Vec::new() });
+        assert!(source_map.get("a/b/c/d.dat").is_some());
+    }
+
+    #[test]
     fn test_source_file_iter() {
         let mut source_map = SourceMap::new();
         let source_file = SourceFile {
-            filename: "tata".to_string(),
             cmds: vec![Command::Triangle(TriangleCmd {
                 color: 2,
                 vertices: [
@@ -974,9 +972,8 @@ mod tests {
                 ],
             })],
         };
-        source_map.insert(source_file);
+        source_map.insert("tata", source_file);
         let s = SourceFile {
-            filename: "toto".to_string(),
             cmds: vec![
                 Command::Triangle(TriangleCmd {
                     color: 16,
@@ -1006,7 +1003,7 @@ mod tests {
                 }),
             ],
         };
-        source_map.insert(s);
+        source_map.insert("toto", s);
         let source_file = source_map.get("toto").unwrap();
         for c in source_file.iter(&source_map) {
             trace!("cmd: {:?}", c);

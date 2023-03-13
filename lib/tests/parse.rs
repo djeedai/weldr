@@ -4,12 +4,12 @@ use weldr::{error::ResolveError, Command, FileRefResolver, SourceFile, SourceMap
 
 use std::collections::HashMap;
 
-fn print_rec(source_map: &SourceMap, source_file: &SourceFile, indent: usize) {
-    eprintln!("{}{}", " ".repeat(indent), source_file.filename);
+fn print_rec(source_map: &SourceMap, filename: &str, source_file: &SourceFile, indent: usize) {
+    eprintln!("{}{}", " ".repeat(indent), filename);
     for cmd in &source_file.cmds {
         if let Command::SubFileRef(sfr_cmd) = cmd {
             let resolved_file = source_map.get(&sfr_cmd.file).unwrap();
-            print_rec(source_map, resolved_file, indent + 2);
+            print_rec(source_map, &sfr_cmd.file, resolved_file, indent + 2);
         }
     }
 }
@@ -83,16 +83,13 @@ fn parse_recursive() {
     assert_eq!(1, source_map.get(&file0.file).unwrap().cmds.len());
 
     let file1 = get_resolved_subfile_ref(&root_file.cmds[1]).unwrap();
-    assert_eq!(source_map.get(&file1.file).unwrap().filename, "b.ldr");
     assert_eq!(2, source_map.get(&file1.file).unwrap().cmds.len());
 
     let file2 = get_resolved_subfile_ref(&root_file.cmds[2]).unwrap();
-    assert_eq!(source_map.get(&file2.file).unwrap().filename, "a.ldr");
     assert_eq!(1, source_map.get(&file2.file).unwrap().cmds.len());
     assert_eq!(file0, file2);
 
     let file1b = get_resolved_subfile_ref(&source_map.get(&file1.file).unwrap().cmds[1]).unwrap();
-    assert_eq!(source_map.get(&file1b.file).unwrap().filename, "a.ldr");
     assert_eq!(file0, file1b);
-    print_rec(&source_map, &root_file, 0);
+    print_rec(&source_map, "root.ldr", &root_file, 0);
 }

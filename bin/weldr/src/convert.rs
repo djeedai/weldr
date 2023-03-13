@@ -105,6 +105,7 @@ impl ConvertCommand {
 
     fn add_nodes(
         &self,
+        filename: &str,
         source_file: &weldr::SourceFile,
         transform: Option<weldr::Mat4>,
         source_map: &weldr::SourceMap,
@@ -116,7 +117,7 @@ impl ConvertCommand {
 
         let node_index = gltf.nodes.len();
         let node = gltf::Node {
-            name: Some(source_file.filename.clone()),
+            name: Some(filename.into()),
             children: Vec::new(),
             mesh_index: None,
             matrix,
@@ -124,21 +125,19 @@ impl ConvertCommand {
         gltf.nodes.push(node);
 
         // TODO: Check the part type rather than the extension.
-        if source_file.filename.ends_with(".dat") {
+        if filename.ends_with(".dat") {
             // Create geometry if the node is a part.
-            let mesh_index = mesh_cache
-                .entry(source_file.filename.clone())
-                .or_insert_with(|| {
-                    let mesh_index = gltf.meshes.len() as u32;
-                    let geometry = self.create_geometry(source_file, source_map);
-                    // Don't set empty meshes to avoid import errors.
-                    if !geometry.vertices.is_empty() && !geometry.triangle_indices.is_empty() {
-                        self.add_mesh(&geometry, gltf, buffer);
-                        Some(mesh_index)
-                    } else {
-                        None
-                    }
-                });
+            let mesh_index = mesh_cache.entry(filename.into()).or_insert_with(|| {
+                let mesh_index = gltf.meshes.len() as u32;
+                let geometry = self.create_geometry(source_file, source_map);
+                // Don't set empty meshes to avoid import errors.
+                if !geometry.vertices.is_empty() && !geometry.triangle_indices.is_empty() {
+                    self.add_mesh(&geometry, gltf, buffer);
+                    Some(mesh_index)
+                } else {
+                    None
+                }
+            });
 
             gltf.nodes[node_index].mesh_index = *mesh_index;
         } else {
@@ -150,6 +149,7 @@ impl ConvertCommand {
                         let transform = sfr_cmd.matrix();
 
                         let child_node_index = self.add_nodes(
+                            &sfr_cmd.file,
                             subfile,
                             Some(transform),
                             source_map,
@@ -201,6 +201,7 @@ impl ConvertCommand {
 
         // Recursively add a node for each file.
         self.add_nodes(
+            "root",
             source_file,
             None,
             source_map,
