@@ -153,28 +153,6 @@ pub struct CommandIterator<'a> {
     source_map: &'a SourceMap,
 }
 
-/// Iterator over all local commands of a [`SourceFile`].
-///
-/// Sub-file reference commands and comment commands are yielded like all other commands.
-/// No command from any other file is yielded.
-pub struct LocalCommandIterator<'a> {
-    stack: Vec<&'a SourceFile>,
-    index: usize,
-    source_map: &'a SourceMap,
-}
-
-// impl std::iter::IntoIterator for SourceFile {
-//     type Item = &'a Command;
-//     type IntoIter = &'a CommandIterator;
-
-//     fn into_iter(self) -> Self::IntoIter {
-//         CommandIterator {
-//             stack: vec![self.clone()],
-//             index: 0,
-//         }
-//     }
-// }
-
 impl SourceFile {
     /// Return an iterator over all drawing commands, recursively stepping into sub-file references
     /// without returning the corresponding [`SubFileRefCmd`] command nor any comment command.
@@ -185,17 +163,6 @@ impl SourceFile {
         };
         CommandIterator {
             stack: vec![(self, 0, draw_ctx)],
-            source_map,
-        }
-    }
-
-    /// Return an iterator over all commands local to this source file, including sub-file references
-    /// and comments. Unlike [`SourceFile::iter()`], this doesn't step into those sub-file references
-    /// but remains in the local source file.
-    pub fn local_iter<'a>(&'a self, source_map: &'a SourceMap) -> LocalCommandIterator<'a> {
-        LocalCommandIterator {
-            stack: vec![self],
-            index: 0,
             source_map,
         }
     }
@@ -231,24 +198,6 @@ impl<'a> Iterator for CommandIterator<'a> {
                 }
                 return Some((*draw_ctx, cmd));
             }
-            self.stack.pop();
-        }
-        None
-    }
-}
-
-impl<'a> Iterator for LocalCommandIterator<'a> {
-    type Item = &'a Command;
-
-    fn next(&mut self) -> Option<&'a Command> {
-        while let Some(source_file) = self.stack.last() {
-            let cmds = &source_file.cmds;
-            if self.index < cmds.len() {
-                let index = self.index;
-                self.index += 1;
-                return Some(&cmds[index]);
-            }
-            self.index = 0;
             self.stack.pop();
         }
         None
@@ -1021,25 +970,6 @@ mod tests {
             assert_eq!(2, tri_cmd.color);
         }
         if let Command::Quad(quad_cmd) = &cmds[2] {
-            assert_eq!(1, quad_cmd.color);
-        }
-
-        let cmds: Vec<_> = source_file.local_iter(&source_map).collect();
-        assert_eq!(4, cmds.len());
-        assert!(matches!(&cmds[0], Command::Triangle(_)));
-        assert!(matches!(&cmds[1], Command::Comment(_)));
-        assert!(matches!(&cmds[2], Command::SubFileRef(_)));
-        assert!(matches!(&cmds[3], Command::Quad(_)));
-        if let Command::Triangle(tri_cmd) = &cmds[0] {
-            assert_eq!(16, tri_cmd.color);
-        }
-        if let Command::Comment(comment_cmd) = &cmds[1] {
-            assert_eq!("my comment", comment_cmd.text);
-        }
-        if let Command::SubFileRef(sfr_cmd) = &cmds[2] {
-            assert_eq!(24, sfr_cmd.color);
-        }
-        if let Command::Quad(quad_cmd) = &cmds[3] {
             assert_eq!(1, quad_cmd.color);
         }
     }
