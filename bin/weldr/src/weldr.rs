@@ -220,19 +220,12 @@ impl DiskResolver {
 }
 
 impl FileRefResolver for DiskResolver {
-    fn resolve(&self, filename: &str) -> Result<Vec<u8>, ResolveError> {
+    fn resolve<P: AsRef<Path>>(&self, filename: P) -> Result<Vec<u8>, ResolveError> {
         self.base_paths
             .iter()
-            .find_map(|prefix| {
-                // LDraw files can contain forward or backward slashes.
-                // Normalize to match the current operating system.
-                let normalized_path: PathBuf = Path::new(&filename.replace("\\", "/"))
-                    .components()
-                    .collect();
-                std::fs::read(prefix.join(normalized_path)).ok()
-            })
+            .find_map(|prefix| std::fs::read(prefix.join(filename.as_ref())).ok())
             .ok_or(ResolveError::new(
-                filename.to_string(),
+                filename.as_ref().to_string_lossy().to_string(),
                 std::io::Error::from(std::io::ErrorKind::NotFound),
             ))
     }

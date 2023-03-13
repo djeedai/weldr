@@ -25,10 +25,11 @@ use crate::{
 // LDraw File Format Specification
 // https://www.ldraw.org/article/218.html
 
-pub fn parse_raw_with_filename(filename: &str, ldr_content: &[u8]) -> Result<Vec<Command>, Error> {
+pub fn parse_raw(ldr_content: &[u8]) -> Result<Vec<Command>, Error> {
     // "An LDraw file consists of one command per line."
+    // TODO: What to set for the error message here?
     many0(read_line)(ldr_content).map_or_else(
-        |e| Err(Error::Parse(ParseError::new_from_nom(filename, &e))),
+        |e| Err(Error::Parse(ParseError::new_from_nom("", &e))),
         |(_, cmds)| Ok(cmds),
     )
 }

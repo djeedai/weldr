@@ -35,10 +35,11 @@ impl MemoryResolver {
 }
 
 impl FileRefResolver for MemoryResolver {
-    fn resolve(&self, filename: &str) -> Result<Vec<u8>, ResolveError> {
-        match self.file_map.get(filename) {
+    fn resolve<P: AsRef<std::path::Path>>(&self, filename: P) -> Result<Vec<u8>, ResolveError> {
+        let filename = filename.as_ref().to_string_lossy().to_string();
+        match self.file_map.get(&filename) {
             Some(file) => Ok(file.clone()),
-            None => Err(ResolveError::new_raw(filename)),
+            None => Err(ResolveError::new_raw(&filename)),
         }
     }
 }

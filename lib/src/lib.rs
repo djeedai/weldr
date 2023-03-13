@@ -67,7 +67,7 @@
 #[macro_use]
 extern crate log;
 
-use std::{collections::HashMap, str};
+use std::{collections::HashMap, path::Path, str};
 
 pub use glam::{Mat4, Vec3, Vec4};
 
@@ -118,7 +118,7 @@ impl Color {
 /// assert_eq!(parse_raw(b"0 this is a comment\n2 16 0 0 0 1 1 1").unwrap(), vec![cmd0, cmd1]);
 /// ```
 pub fn parse_raw(ldr_content: &[u8]) -> Result<Vec<Command>, Error> {
-    parse::parse_raw_with_filename("", ldr_content)
+    parse::parse_raw(ldr_content)
 }
 
 struct FileRef {
@@ -257,23 +257,24 @@ impl<'a> Iterator for LocalCommandIterator<'a> {
     }
 }
 
-fn load_and_parse_single_file(
-    filename: &str,
-    resolver: &dyn FileRefResolver,
+fn load_and_parse_single_file<P: AsRef<Path>, R: FileRefResolver>(
+    filename: P,
+    resolver: &R,
 ) -> Result<SourceFile, Error> {
     // We should never have "unparsed" source files.
     // Caching only is always keyed by filenames anyway.
+    let filename_text = filename.as_ref().to_string_lossy().to_string();
     let raw_content = resolver.resolve(filename)?;
-    let cmds = parse::parse_raw_with_filename(filename, &raw_content)?;
+    let cmds = parse::parse_raw(&raw_content)?;
     Ok(SourceFile {
-        filename: filename.to_string(),
+        filename: filename_text,
         cmds,
     })
 }
 
 /// Parse a single file and its sub-file references recursively.
 ///
-/// Attempt to load the content of `filename` via the given `resolver`, and parse it.
+/// Attempt to load the content of `path` via the given `resolver`, and parse it.
 /// Then recursively look for sub-file commands inside that root file, and try to resolve
 /// the content of those sub-files and parse them too. All the loaded and parsed files end
 /// up populating the given `source_map`, which can be pre-populated manually or from a
@@ -284,7 +285,7 @@ fn load_and_parse_single_file(
 /// struct MyCustomResolver;
 ///
 /// impl FileRefResolver for MyCustomResolver {
-///   fn resolve(&self, filename: &str) -> Result<Vec<u8>, ResolveError> {
+///   fn resolve<P: AsRef<std::path::Path>>(&self, filename: P) -> Result<Vec<u8>, ResolveError> {
 ///     Ok(vec![]) // replace with custom impl
 ///   }
 /// }
@@ -298,20 +299,18 @@ fn load_and_parse_single_file(
 ///   Ok(())
 /// }
 /// ```
-pub fn parse<R: FileRefResolver>(
-    filename: &str,
+pub fn parse<P: AsRef<Path>, R: FileRefResolver>(
+    path: P,
     resolver: &R,
     source_map: &mut SourceMap,
 ) -> Result<String, Error> {
-    if source_map.get(filename).is_some() {
-        return Ok(filename.into());
-    }
-
     // Use a stack to avoid function recursion in load_file.
     let mut stack: Vec<FileRef> = Vec::new();
 
-    debug!("Processing root file '{}'", filename);
-    let actual_root = load_file(filename, resolver, source_map, &mut stack)?;
+    debug!("Processing root file '{:?}'", path.as_ref());
+    // The provided path should refer to a file from the resolver.
+    // Use the path directly without any normalization.
+    let actual_root = load_file(path, resolver, source_map, &mut stack)?;
 
     // Recursively load files referenced by the root file.
     while let Some(file) = stack.pop() {
@@ -321,7 +320,9 @@ pub fn parse<R: FileRefResolver>(
             Some(_) => trace!("Already parsed; reusing sub-file: {}", filename),
             None => {
                 trace!("Not yet parsed; parsing sub-file: {}", filename);
-                load_file(filename, resolver, source_map, &mut stack)?;
+                // Normalize file references to subfiles.
+                let subfile_ref = SubFileRef::new(&filename);
+                load_subfile(subfile_ref, resolver, source_map, &mut stack)?;
             }
         }
     }
@@ -329,8 +330,8 @@ pub fn parse<R: FileRefResolver>(
     Ok(actual_root)
 }
 
-fn load_file<R: FileRefResolver>(
-    filename: &str,
+fn load_file<P: AsRef<Path>, R: FileRefResolver>(
+    filename: P,
     resolver: &R,
     source_map: &mut SourceMap,
     stack: &mut Vec<FileRef>,
@@ -338,6 +339,15 @@ fn load_file<R: FileRefResolver>(
     let source_file = load_and_parse_single_file(filename, resolver)?;
     source_map.queue_subfiles(&source_file, stack);
     Ok(source_map.insert(source_file))
+}
+
+fn load_subfile<R: FileRefResolver>(
+    filename: SubFileRef,
+    resolver: &R,
+    source_map: &mut SourceMap,
+    stack: &mut Vec<FileRef>,
+) -> Result<String, Error> {
+    load_file(filename.0, resolver, source_map, stack)
 }
 
 /// [Line Type 0](https://www.ldraw.org/article/218.html#lt0) META command:
@@ -481,17 +491,34 @@ pub struct Base64DataCmd {
 #[derive(Debug, PartialEq, Clone)]
 pub struct SourceFile {
     /// The relative filename of the file as resolved.
+    // TODO: This can be removed.
     pub filename: String,
     /// LDraw commands parsed from the raw text content of the file.
     pub cmds: Vec<Command>,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+struct SubFileRef(String);
+
+impl SubFileRef {
+    fn new(s: &str) -> Self {
+        Self(normalize_subfile_reference(s))
+    }
+}
+
+fn normalize_subfile_reference(s: &str) -> String {
+    // LDraw filenames are not case sensitive.
+    // This also includes references to MPD subfiles.
+    // Normalize paths to lowercase and forward slashes.
+    // The official parts library can be assumed to use lowercase.
+    s.to_lowercase().replace("\\", "/")
 }
 
 /// Collection of [`SourceFile`] accessible from their reference filename.
 #[derive(Debug)]
 pub struct SourceMap {
     /// Map of filenames to source files.
-    // TODO: How to handle case sensitivity like STUD.DAT vs stud.dat?
-    source_files: HashMap<String, SourceFile>,
+    source_files: HashMap<SubFileRef, SourceFile>,
 }
 
 impl SourceMap {
@@ -504,12 +531,13 @@ impl SourceMap {
 
     /// Returns a reference to the source file corresponding to `filename`.
     pub fn get(&self, filename: &str) -> Option<&SourceFile> {
-        self.source_files.get(filename)
+        // TODO: handle normalization and case sensitivity.
+        self.source_files.get(&SubFileRef::new(filename))
     }
 
     /// Returns a mutable reference to the source file corresponding to `filename`.
     pub fn get_mut(&mut self, filename: &str) -> Option<&mut SourceFile> {
-        self.source_files.get_mut(filename)
+        self.source_files.get_mut(&SubFileRef::new(filename))
     }
 
     /// Inserts a new source file into the collection.
@@ -523,13 +551,14 @@ impl SourceMap {
         if files.is_empty() {
             // TODO: More cleanly handle the fact that not all files have 0 FILE commands.
             self.source_files
-                .insert(source_file.filename.clone(), source_file.clone());
+                .insert(SubFileRef::new(&source_file.filename), source_file.clone());
             source_file.filename
         } else {
             // The first block is the "main model" of the file.
             let main_model_name = files[0].filename.clone();
             for file in files {
-                self.source_files.insert(file.filename.clone(), file);
+                self.source_files
+                    .insert(SubFileRef::new(&file.filename), file);
             }
             main_model_name
         }
@@ -713,7 +742,7 @@ pub trait FileRefResolver {
     /// Unix style `\n` or Windows style `\r\n`.
     ///
     /// See [`parse()`] for usage.
-    fn resolve(&self, filename: &str) -> Result<Vec<u8>, ResolveError>;
+    fn resolve<P: AsRef<Path>>(&self, filename: P) -> Result<Vec<u8>, ResolveError>;
 }
 
 impl SubFileRefCmd {
