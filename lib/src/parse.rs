@@ -266,6 +266,7 @@ fn other_material(i: &[u8]) -> IResult<&[u8], ColorFinish> {
 // MATERIAL finish part of !COLOUR
 fn material_finish(i: &[u8]) -> IResult<&[u8], ColorFinish> {
     let (i, _) = tag_no_case(b"MATERIAL")(i)?;
+    let (i, _) = sp(i)?;
     alt((glitter_material, speckle_material, other_material))(i)
 }
 
@@ -879,19 +880,17 @@ mod tests {
     #[test]
     fn test_meta_colour() {
         assert_eq!(meta_colour(b""), Err(nom_error(&b""[..], ErrorKind::Tag)));
+        // Test one color of each type from LDCfgalt.ldr
+        // The formatting is similar in LDConfig.ldr.
         assert_eq!(
-            meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456"),
-            Err(nom_error(&b""[..], ErrorKind::Space))
-        );
-        assert_eq!(
-            meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef"),
+            meta_colour(b"!COLOUR Black                              CODE   0   VALUE #1B2A34   EDGE #2B4354"),
             Ok((
                 &b""[..],
                 Command::Colour(ColourCmd {
-                    name: "test_col".to_string(),
-                    code: 20,
-                    value: Color::new(0x12, 0x34, 0x56),
-                    edge: Color::new(0xAB, 0xCD, 0xEF),
+                    name: "Black".to_string(),
+                    code: 0,
+                    value: Color::new(0x1B, 0x2A, 0x34),
+                    edge: Color::new(0x2B, 0x43, 0x54),
                     alpha: None,
                     luminance: None,
                     finish: None
@@ -899,14 +898,14 @@ mod tests {
             ))
         );
         assert_eq!(
-            meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef ALPHA 128"),
+            meta_colour(b"!COLOUR Trans_Dark_Blue                    CODE  33   VALUE #0020A0   EDGE #000B38   ALPHA 128"),
             Ok((
                 &b""[..],
                 Command::Colour(ColourCmd {
-                    name: "test_col".to_string(),
-                    code: 20,
-                    value: Color::new(0x12, 0x34, 0x56),
-                    edge: Color::new(0xAB, 0xCD, 0xEF),
+                    name: "Trans_Dark_Blue".to_string(),
+                    code: 33,
+                    value: Color::new(0x00, 0x20, 0xA0),
+                    edge: Color::new(0x00, 0x0B, 0x38),
                     alpha: Some(128),
                     luminance: None,
                     finish: None
@@ -914,46 +913,14 @@ mod tests {
             ))
         );
         assert_eq!(
-            meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef LUMINANCE 32"),
+            meta_colour(b"!COLOUR Chrome_Antique_Brass               CODE  60   VALUE #645A4C   EDGE #665B4D                               CHROME"),
             Ok((
                 &b""[..],
                 Command::Colour(ColourCmd {
-                    name: "test_col".to_string(),
-                    code: 20,
-                    value: Color::new(0x12, 0x34, 0x56),
-                    edge: Color::new(0xAB, 0xCD, 0xEF),
-                    alpha: None,
-                    luminance: Some(32),
-                    finish: None
-                })
-            ))
-        );
-        assert_eq!(
-            meta_colour(
-                b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef ALPHA 64 LUMINANCE 32"
-            ),
-            Ok((
-                &b""[..],
-                Command::Colour(ColourCmd {
-                    name: "test_col".to_string(),
-                    code: 20,
-                    value: Color::new(0x12, 0x34, 0x56),
-                    edge: Color::new(0xAB, 0xCD, 0xEF),
-                    alpha: Some(64),
-                    luminance: Some(32),
-                    finish: None
-                })
-            ))
-        );
-        assert_eq!(
-            meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef CHROME"),
-            Ok((
-                &b""[..],
-                Command::Colour(ColourCmd {
-                    name: "test_col".to_string(),
-                    code: 20,
-                    value: Color::new(0x12, 0x34, 0x56),
-                    edge: Color::new(0xAB, 0xCD, 0xEF),
+                    name: "Chrome_Antique_Brass".to_string(),
+                    code: 60,
+                    value: Color::new(0x64, 0x5A, 0x4C),
+                    edge: Color::new(0x66, 0x5B, 0x4D),
                     alpha: None,
                     luminance: None,
                     finish: Some(ColorFinish::Chrome)
@@ -961,17 +928,109 @@ mod tests {
             ))
         );
         assert_eq!(
-            meta_colour(b"!COLOUR test_col CODE 20 VALUE #123456 EDGE #abcdef ALPHA 128 RUBBER"),
+            meta_colour(b"!COLOUR Pearl_Gold                         CODE 297   VALUE #AA7F2E   EDGE #805F23                               PEARLESCENT"),
             Ok((
                 &b""[..],
                 Command::Colour(ColourCmd {
-                    name: "test_col".to_string(),
-                    code: 20,
-                    value: Color::new(0x12, 0x34, 0x56),
-                    edge: Color::new(0xAB, 0xCD, 0xEF),
-                    alpha: Some(128),
+                    name: "Pearl_Gold".to_string(),
+                    code: 297,
+                    value: Color::new(0xAA, 0x7F, 0x2E),
+                    edge: Color::new(0x80, 0x5F, 0x23),
+                    alpha: None,
                     luminance: None,
-                    finish: Some(ColorFinish::Rubber)
+                    finish: Some(ColorFinish::Pearlescent)
+                })
+            ))
+        );
+        assert_eq!(
+            meta_colour(b"!COLOUR Metallic_Silver                    CODE  80   VALUE #767676   EDGE #8E8E8E                               METAL"),
+            Ok((
+                &b""[..],
+                Command::Colour(ColourCmd {
+                    name: "Metallic_Silver".to_string(),
+                    code: 80,
+                    value: Color::new(0x76, 0x76, 0x76),
+                    edge: Color::new(0x8E, 0x8E, 0x8E),
+                    alpha: None,
+                    luminance: None,
+                    finish: Some(ColorFinish::Metal)
+                })
+            ))
+        );
+        assert_eq!(
+            meta_colour(b"!COLOUR Glow_In_Dark_White                 CODE 329   VALUE #F5F3D7   EDGE #E0DA85   ALPHA 240   LUMINANCE 15"),
+            Ok((
+                &b""[..],
+                Command::Colour(ColourCmd {
+                    name: "Glow_In_Dark_White".to_string(),
+                    code: 329,
+                    value: Color::new(0xF5, 0xF3, 0xD7),
+                    edge: Color::new(0xE0, 0xDA, 0x85),
+                    alpha: Some(240),
+                    luminance: Some(15),
+                    finish: None
+                })
+            ))
+        );
+        assert_eq!(
+            meta_colour(b"!COLOUR Opal_Trans_Dark_Blue               CODE 10366 VALUE #0020A0   EDGE #000B38   ALPHA 200   LUMINANCE  5    MATERIAL GLITTER VALUE #001D38 FRACTION 0.8 VFRACTION 0.6 MINSIZE 0.02 MAXSIZE 0.1"),
+            Ok((
+                &b""[..],
+                Command::Colour(ColourCmd {
+                    name: "Opal_Trans_Dark_Blue".to_string(),
+                    code: 10366,
+                    value: Color::new(0x00, 0x20, 0xA0),
+                    edge: Color::new(0x00, 0x0B, 0x38),
+                    alpha: Some(200),
+                    luminance: Some(5),
+                    finish: Some(ColorFinish::Material(MaterialFinish::Glitter(
+                        GlitterMaterial {
+                            value: Color::new(0x00, 0x1D, 0x38),
+                            alpha: None,
+                            luminance: None,
+                            surface_fraction: 0.8,
+                            volume_fraction: 0.6,
+                            size: GrainSize::MinMaxSize((0.02, 0.1)),
+                        },
+                    ))),
+                })
+            ))
+        );
+        assert_eq!(
+            meta_colour(b"!COLOUR Speckle_Black_Silver               CODE 132   VALUE #000000   EDGE #898788                               MATERIAL SPECKLE VALUE #898788 FRACTION 0.4 MINSIZE 1 MAXSIZE 3"),
+            Ok((
+                &b""[..],
+                Command::Colour(ColourCmd {
+                    name: "Speckle_Black_Silver".to_string(),
+                    code: 132,
+                    value: Color::new(0x00, 0x00, 0x00),
+                    edge: Color::new(0x89, 0x87, 0x88),
+                    alpha: None,
+                    luminance: None,
+                    finish: Some(ColorFinish::Material(MaterialFinish::Speckle(
+                        SpeckleMaterial {
+                            value: Color::new(0x89, 0x87, 0x88),
+                            alpha: None,
+                            luminance: None,
+                            surface_fraction: 0.4,
+                            size: GrainSize::MinMaxSize((1.0, 3.0)),
+                        },
+                    ))),
+                })
+            ))
+        );
+        assert_eq!(
+            meta_colour(b"!COLOUR Rubber_Yellow                      CODE  65   VALUE #FAC80A   EDGE #9A7C03                               RUBBER"),
+            Ok((
+                &b""[..],
+                Command::Colour(ColourCmd {
+                    name: "Rubber_Yellow".to_string(),
+                    code: 65,
+                    value: Color::new(0xFA, 0xC8, 0x0A),
+                    edge: Color::new(0x9A, 0x7C, 0x03),
+                    alpha: None,
+                    luminance: None,
+                    finish: Some(ColorFinish::Rubber),
                 })
             ))
         );
