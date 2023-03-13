@@ -147,7 +147,7 @@ pub struct DrawContext {
 /// Iterator over all drawing commands of a [`SourceFile`] and all its referenced sub-files.
 ///
 /// Sub-file reference commands are not yielded, but instead the drawing commands of those
-/// sub-files are iterated over. Comment commands are skipped.
+/// sub-files are iterated over.
 pub struct CommandIterator<'a> {
     stack: Vec<(&'a SourceFile, usize, DrawContext)>,
     source_map: &'a SourceMap,
@@ -155,7 +155,7 @@ pub struct CommandIterator<'a> {
 
 impl SourceFile {
     /// Return an iterator over all drawing commands, recursively stepping into sub-file references
-    /// without returning the corresponding [`SubFileRefCmd`] command nor any comment command.
+    /// without returning the corresponding [`SubFileRefCmd`] command.
     pub fn iter<'a>(&'a self, source_map: &'a SourceMap) -> CommandIterator<'a> {
         let draw_ctx = DrawContext {
             transform: Mat4::IDENTITY,
@@ -173,9 +173,7 @@ impl<'a> Iterator for CommandIterator<'a> {
 
     fn next(&mut self) -> Option<(DrawContext, &'a Command)> {
         while let Some((file, index, draw_ctx)) = self.stack.last_mut() {
-            let cmds = &file.cmds;
-            if *index < cmds.len() {
-                let cmd = &cmds[*index];
+            if let Some(cmd) = file.cmds.get(*index) {
                 *index += 1;
                 if let Command::SubFileRef(sfr_cmd) = &cmd {
                     if let Some(source_file) = self.source_map.get(&sfr_cmd.file) {
@@ -192,9 +190,6 @@ impl<'a> Iterator for CommandIterator<'a> {
                         self.stack.push((source_file, 0, draw_ctx));
                         continue;
                     }
-                } else if let Command::Comment(_) = &cmd {
-                    // Skip comments
-                    continue;
                 }
                 return Some((*draw_ctx, cmd));
             }
@@ -932,7 +927,7 @@ mod tests {
                         Vec3::new(0.0, 1.0, 1.0),
                     ],
                 }),
-                Command::Comment(CommentCmd::new("my comment")),
+                Command::Comment(CommentCmd::new("!APPLICATION STUFF")),
                 Command::SubFileRef(SubFileRefCmd {
                     color: 24,
                     pos: Vec3::new(0.0, 0.0, 0.0),
@@ -959,10 +954,13 @@ mod tests {
         }
 
         let cmds: Vec<_> = source_file.iter(&source_map).map(|(_, cmd)| cmd).collect();
-        assert_eq!(3, cmds.len());
+        assert_eq!(4, cmds.len());
         assert!(matches!(&cmds[0], Command::Triangle(_)));
-        assert!(matches!(&cmds[1], Command::Triangle(_)));
-        assert!(matches!(&cmds[2], Command::Quad(_)));
+        // Some applications define their own meta commands.
+        // Check that these are not ignored.
+        assert!(matches!(&cmds[1], Command::Comment(_)));
+        assert!(matches!(&cmds[2], Command::Triangle(_)));
+        assert!(matches!(&cmds[3], Command::Quad(_)));
         if let Command::Triangle(tri_cmd) = &cmds[0] {
             assert_eq!(16, tri_cmd.color);
         }
