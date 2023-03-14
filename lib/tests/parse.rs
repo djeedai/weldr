@@ -93,3 +93,27 @@ fn parse_recursive() {
     assert_eq!(file0, file1b);
     print_rec(&source_map, "root.ldr", &root_file, 0);
 }
+
+#[test]
+fn parse_cycle() {
+    let mut memory_resolver = MemoryResolver::new();
+
+    // Infinite recursion on a naive implementation.
+    let ldr_contents = b"0 FILE a.ldr
+    1 16 0 0 0 1 0 0 0 1 0 0 0 1 b.ldr
+
+    0 FILE b.ldr
+    1 16 0 0 0 1 0 0 0 1 0 0 0 1 a.ldr
+    ";
+
+    memory_resolver.add("root.ldr", ldr_contents);
+
+    let mut source_map = weldr::SourceMap::new();
+
+    weldr::parse("root.ldr", &memory_resolver, &mut source_map).unwrap();
+    let file_a = source_map.get("a.ldr").unwrap();
+    assert_eq!(2, file_a.cmds.len());
+
+    let file_b = source_map.get("b.ldr").unwrap();
+    assert_eq!(2, file_b.cmds.len());
+}
