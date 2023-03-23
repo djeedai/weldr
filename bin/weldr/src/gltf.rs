@@ -68,6 +68,9 @@ pub struct Node {
     #[serde(rename(serialize = "mesh"))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mesh_index: Option<u32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matrix: Option<[f32; 16]>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -100,6 +103,9 @@ pub struct BufferView {
     #[serde(rename(serialize = "byteStride"))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub byte_stride: Option<u32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<u32>,
 }
 
 fn is_zero(value: &u32) -> bool {
@@ -167,6 +173,12 @@ pub struct Accessor {
 
     #[serde(skip_serializing_if = "is_false")]
     pub normalized: bool, // optional, but defaults to false
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min: Option<[f32; 3]>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<[f32; 3]>,
 }
 
 #[derive(Serialize_repr, Deserialize_repr, PartialEq, Debug, Clone, Copy)]
@@ -270,6 +282,11 @@ impl Buffer {
         self.uri = Some(uri.to_string());
         self
     }
+}
+
+pub enum BufferTarget {
+    ArrayBuffer = 34962,
+    ElementArrayBuffer = 34963,
 }
 
 #[cfg(test)]

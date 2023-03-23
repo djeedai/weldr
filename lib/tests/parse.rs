@@ -1,22 +1,15 @@
 extern crate weldr;
 
-use weldr::{error::ResolveError, Command, FileRefResolver, SourceFileRef, SourceMap, SubFileRef};
+use weldr::{error::ResolveError, Command, FileRefResolver, SourceFile, SourceMap, SubFileRefCmd};
 
 use std::collections::HashMap;
 
-fn print_rec(source_map: &SourceMap, source_file_ref: SourceFileRef, indent: usize) {
-    let source_file = source_file_ref.get(source_map);
-    eprintln!("{}{}", " ".repeat(indent), source_file.filename);
+fn print_rec(source_map: &SourceMap, filename: &str, source_file: &SourceFile, indent: usize) {
+    eprintln!("{}{}", " ".repeat(indent), filename);
     for cmd in &source_file.cmds {
         if let Command::SubFileRef(sfr_cmd) = cmd {
-            match &sfr_cmd.file {
-                SubFileRef::ResolvedRef(resolved_file) => {
-                    print_rec(source_map, *resolved_file, indent + 2);
-                }
-                SubFileRef::UnresolvedRef(filename) => {
-                    eprintln!("Unresolved ref: {}", filename);
-                }
-            }
+            let resolved_file = source_map.get(&sfr_cmd.file).unwrap();
+            print_rec(source_map, &sfr_cmd.file, resolved_file, indent + 2);
         }
     }
 }
@@ -42,21 +35,19 @@ impl MemoryResolver {
 }
 
 impl FileRefResolver for MemoryResolver {
-    fn resolve(&self, filename: &str) -> Result<Vec<u8>, ResolveError> {
-        match self.file_map.get(filename) {
+    fn resolve<P: AsRef<std::path::Path>>(&self, filename: P) -> Result<Vec<u8>, ResolveError> {
+        let filename = filename.as_ref().to_string_lossy().to_string();
+        match self.file_map.get(&filename) {
             Some(file) => Ok(file.clone()),
-            None => Err(ResolveError::new_raw(filename)),
+            None => Err(ResolveError::new_raw(&filename)),
         }
     }
 }
 
 /// Get the sub-file reference command out of a given command.
-fn get_resolved_subfile_ref(cmd: &Command) -> Option<SourceFileRef> {
+fn get_resolved_subfile_ref(cmd: &Command) -> Option<&SubFileRefCmd> {
     match cmd {
-        Command::SubFileRef(sfr_cmd) => match &sfr_cmd.file {
-            SubFileRef::ResolvedRef(source_file_ref) => Some(*source_file_ref),
-            _ => None,
-        },
+        Command::SubFileRef(sfr_cmd) => Some(sfr_cmd),
         _ => None,
     }
 }
@@ -83,21 +74,46 @@ fn parse_recursive() {
         b"4 16 1 1 0 0.9239 1 0.3827 0.9239 0 0.3827 1 0 0\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 a.ldr",
     );
     let mut source_map = weldr::SourceMap::new();
-    let root_file_ref = weldr::parse("root.ldr", &memory_resolver, &mut source_map).unwrap();
-    let root_file = root_file_ref.get(&source_map);
+    let root_file_name = weldr::parse("root.ldr", &memory_resolver, &mut source_map).unwrap();
+    let root_file = source_map.get(&root_file_name).unwrap();
     assert_eq!(3, root_file.cmds.len());
+
     let file0 = get_resolved_subfile_ref(&root_file.cmds[0]).unwrap();
-    assert_eq!(file0.get(&source_map).filename, "a.ldr");
-    assert_eq!(1, file0.get(&source_map).cmds.len());
+    assert_eq!(file0.file, "a.ldr");
+    assert_eq!(1, source_map.get(&file0.file).unwrap().cmds.len());
+
     let file1 = get_resolved_subfile_ref(&root_file.cmds[1]).unwrap();
-    assert_eq!(file1.get(&source_map).filename, "b.ldr");
-    assert_eq!(2, file1.get(&source_map).cmds.len());
+    assert_eq!(2, source_map.get(&file1.file).unwrap().cmds.len());
+
     let file2 = get_resolved_subfile_ref(&root_file.cmds[2]).unwrap();
-    assert_eq!(file2.get(&source_map).filename, "a.ldr");
-    assert_eq!(1, file2.get(&source_map).cmds.len());
+    assert_eq!(1, source_map.get(&file2.file).unwrap().cmds.len());
     assert_eq!(file0, file2);
-    let file1b = get_resolved_subfile_ref(&file1.get(&source_map).cmds[1]).unwrap();
-    assert_eq!(file1b.get(&source_map).filename, "a.ldr");
+
+    let file1b = get_resolved_subfile_ref(&source_map.get(&file1.file).unwrap().cmds[1]).unwrap();
     assert_eq!(file0, file1b);
-    print_rec(&source_map, root_file_ref, 0);
+    print_rec(&source_map, "root.ldr", &root_file, 0);
+}
+
+#[test]
+fn parse_cycle() {
+    let mut memory_resolver = MemoryResolver::new();
+
+    // Infinite recursion on a naive implementation.
+    let ldr_contents = b"0 FILE a.ldr
+    1 16 0 0 0 1 0 0 0 1 0 0 0 1 b.ldr
+
+    0 FILE b.ldr
+    1 16 0 0 0 1 0 0 0 1 0 0 0 1 a.ldr
+    ";
+
+    memory_resolver.add("root.ldr", ldr_contents);
+
+    let mut source_map = weldr::SourceMap::new();
+
+    weldr::parse("root.ldr", &memory_resolver, &mut source_map).unwrap();
+    let file_a = source_map.get("a.ldr").unwrap();
+    assert_eq!(2, file_a.cmds.len());
+
+    let file_b = source_map.get("b.ldr").unwrap();
+    assert_eq!(2, file_b.cmds.len());
 }

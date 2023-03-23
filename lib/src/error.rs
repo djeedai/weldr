@@ -64,9 +64,9 @@ impl ParseError {
 
 impl ResolveError {
     /// Create a [`ResolveError`] that stems from an arbitrary error of an underlying resolution error.
-    pub fn new(filename: &str, err: impl Into<Box<dyn std::error::Error>>) -> Self {
+    pub fn new(filename: String, err: impl Into<Box<dyn std::error::Error>>) -> Self {
         ResolveError {
-            filename: filename.to_string(),
+            filename,
             resolve_error: Some(err.into()),
         }
     }
@@ -138,7 +138,7 @@ mod tests {
             parse_error: None,
         });
         Err(Error::Resolve(ResolveError::new(
-            "test_file.ldr",
+            "test_file.ldr".to_string(),
             underlying,
         )))
     }

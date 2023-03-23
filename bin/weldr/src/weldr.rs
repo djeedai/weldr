@@ -20,13 +20,10 @@ use log::{Metadata, Record};
 use ordered_float::NotNan;
 use std::{
     collections::HashMap,
-    fs::File,
-    io::BufReader,
-    io::Read,
     path::{Path, PathBuf},
 };
 use structopt::StructOpt;
-use weldr::{DrawContext, FileRefResolver, Mat4, ResolveError, Vec3, Vec4};
+use weldr::{DrawContext, FileRefResolver, Mat4, ResolveError, Vec3};
 
 #[derive(Debug, StructOpt)]
 pub(crate) struct LoggerConfig {
@@ -195,7 +192,6 @@ impl DiskResolver {
             .map_err(|e| Error::NotFound(format!("catalog path not found ({})", e)))?;
         let base_paths = vec![
             catalog_path.join("p"),
-            catalog_path.join("p").join("48"),
             catalog_path.join("parts"),
             catalog_path.join("parts").join("s"),
         ];
@@ -224,25 +220,15 @@ impl DiskResolver {
 }
 
 impl FileRefResolver for DiskResolver {
-    fn resolve(&self, filename: &str) -> Result<Vec<u8>, ResolveError> {
-        for prefix in &self.base_paths {
-            let full_path = prefix.join(filename);
-            let file = File::open(full_path);
-            if file.is_err() {
-                continue;
-            }
-            let file = file.unwrap();
-            let mut buf_reader = BufReader::new(file);
-            let mut buffer = Vec::new();
-            match buf_reader.read_to_end(&mut buffer) {
-                Ok(_) => return Ok(buffer),
-                Err(e) => return Err(ResolveError::new(filename, e)),
-            }
-        }
-        Err(ResolveError::new(
-            filename,
-            std::io::Error::from(std::io::ErrorKind::NotFound),
-        ))
+    fn resolve<P: AsRef<Path>>(&self, filename: P) -> Result<Vec<u8>, ResolveError> {
+        self.base_paths
+            .iter()
+            .find_map(|prefix| std::fs::read(prefix.join(filename.as_ref())).ok())
+            .or_else(|| std::fs::read(filename.as_ref()).ok())
+            .ok_or(ResolveError::new(
+                filename.as_ref().to_string_lossy().to_string(),
+                std::io::Error::from(std::io::ErrorKind::NotFound),
+            ))
     }
 }
 
@@ -286,14 +272,6 @@ impl std::convert::From<&Vec3> for VecRef {
     }
 }
 
-struct GeometryBuffer {
-    size: usize,
-    offset: usize,
-    stride: usize,
-    component_type: gltf::ComponentType,
-    attribute_type: gltf::AttributeType,
-}
-
 struct GeometryCache {
     vertices: Vec<Vec3>,
     vertex_map: HashMap<VecRef, u32>,
@@ -313,8 +291,7 @@ impl GeometryCache {
 
     /// Insert a new vertex and return its index.
     fn insert_vertex(&mut self, vec: &Vec3, transform: &Mat4) -> u32 {
-        let vec4 = Vec4::new(vec.x, vec.y, vec.z, 1.0);
-        let vec = (transform * vec4).truncate();
+        let vec = transform.transform_point3(*vec);
         match self.vertex_map.get(&vec.into()) {
             Some(index) => *index,
             None => {
@@ -447,7 +424,6 @@ mod tests {
         let test_folder = testutils::setup_test_folder("disk_resolver_new_from_catalog");
         let paths = [
             test_folder.path().join("p"),
-            test_folder.path().join("p").join("48"),
             test_folder.path().join("parts"),
             test_folder.path().join("parts").join("s"),
             test_folder.path().join("extra"),
@@ -457,7 +433,7 @@ mod tests {
         }
         let mut resolver = DiskResolver::new_from_catalog(test_folder.path()).unwrap();
         resolver.add_path(test_folder.path().join("extra")).unwrap();
-        assert_eq!(5, resolver.base_paths.len());
+        assert_eq!(4, resolver.base_paths.len());
         for path in &paths {
             assert!(resolver.base_paths.iter().any(|p| p == path));
         }
@@ -543,21 +519,21 @@ mod tests {
     fn test_geocache_insert() {
         let mut geo = GeometryCache::new();
         // First vertex always inserts
-        let index = geo.insert_vertex(&Vec3::new(0.0, 1.0, 2.0), &Mat4::from_scale(1.0));
+        let index = geo.insert_vertex(&Vec3::new(0.0, 1.0, 2.0), &Mat4::IDENTITY);
         assert_eq!(0, index);
         assert_eq!(1, geo.vertex_map.len());
         assert_eq!(1, geo.vertices.len());
         assert_eq!(0, geo.line_indices.len());
         assert_eq!(0, geo.triangle_indices.len());
         // Duplicate vertex
-        let index = geo.insert_vertex(&Vec3::new(0.0, 1.0, 2.0), &Mat4::from_scale(1.0));
+        let index = geo.insert_vertex(&Vec3::new(0.0, 1.0, 2.0), &Mat4::IDENTITY);
         assert_eq!(0, index);
         assert_eq!(1, geo.vertex_map.len());
         assert_eq!(1, geo.vertices.len());
         assert_eq!(0, geo.line_indices.len());
         assert_eq!(0, geo.triangle_indices.len());
         // New unique vertex
-        let index = geo.insert_vertex(&Vec3::new(-5.0, 1.0, 2.0), &Mat4::from_scale(1.0));
+        let index = geo.insert_vertex(&Vec3::new(-5.0, 1.0, 2.0), &Mat4::IDENTITY);
         assert_eq!(1, index);
         assert_eq!(2, geo.vertices.len());
         assert_eq!(2, geo.vertex_map.len());
@@ -569,7 +545,7 @@ mod tests {
     fn test_geocache_add_line() {
         let mut geo = GeometryCache::new();
         let draw_ctx = DrawContext {
-            transform: Mat4::from_scale(1.0),
+            transform: Mat4::IDENTITY,
             color: 16,
         };
         geo.add_line(
@@ -586,7 +562,7 @@ mod tests {
     fn test_geocache_add_triangle() {
         let mut geo = GeometryCache::new();
         let draw_ctx = DrawContext {
-            transform: Mat4::from_scale(1.0),
+            transform: Mat4::IDENTITY,
             color: 16,
         };
         geo.add_triangle(
@@ -607,7 +583,7 @@ mod tests {
     fn test_geocache_add_quad() {
         let mut geo = GeometryCache::new();
         let draw_ctx = DrawContext {
-            transform: Mat4::from_scale(1.0),
+            transform: Mat4::IDENTITY,
             color: 16,
         };
         geo.add_quad(
