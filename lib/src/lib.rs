@@ -90,8 +90,8 @@ pub struct Color {
 
 impl Color {
     /// Construct a new color instance from individual RGB components.
-    pub fn new(red: u8, green: u8, blue: u8) -> Color {
-        Color { red, green, blue }
+    pub fn new(red: u8, green: u8, blue: u8) -> Self {
+        Self { red, green, blue }
     }
 }
 
@@ -393,8 +393,8 @@ pub struct CommentCmd {
 }
 
 impl CommentCmd {
-    pub fn new(text: &str) -> CommentCmd {
-        CommentCmd {
+    pub fn new(text: &str) -> Self {
+        Self {
             text: text.to_string(),
         }
     }
@@ -457,8 +457,8 @@ pub struct SourceMap {
 
 impl SourceMap {
     /// Construct a new empty source map.
-    pub fn new() -> SourceMap {
-        SourceMap {
+    pub fn new() -> Self {
+        Self {
             source_files: HashMap::new(),
         }
     }

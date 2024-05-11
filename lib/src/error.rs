@@ -36,7 +36,7 @@ pub struct ResolveError {
 impl ParseError {
     /// Create a [`ParseError`] that stems from an arbitrary error of an underlying parser.
     pub fn new(filename: &str, err: impl Into<Box<dyn std::error::Error>>) -> Self {
-        ParseError {
+        Self {
             filename: filename.to_string(),
             parse_error: Some(err.into()),
         }
@@ -45,7 +45,7 @@ impl ParseError {
     /// Create a [`ParseError`] that stems from a [`nom`] parsing error, capturing the [`nom::error::ErrorKind`]
     /// from the underlying parser which failed.
     pub fn new_from_nom(filename: &str, err: &nom::Err<nom::error::Error<&[u8]>>) -> Self {
-        ParseError {
+        Self {
             filename: filename.to_string(),
             parse_error: match err {
                 nom::Err::Incomplete(_) => None,
@@ -65,7 +65,7 @@ impl ParseError {
 impl ResolveError {
     /// Create a [`ResolveError`] that stems from an arbitrary error of an underlying resolution error.
     pub fn new(filename: String, err: impl Into<Box<dyn std::error::Error>>) -> Self {
-        ResolveError {
+        Self {
             filename,
             resolve_error: Some(err.into()),
         }
@@ -73,7 +73,7 @@ impl ResolveError {
 
     /// Create a [`ResolveError`] without any underlying error.
     pub fn new_raw(filename: &str) -> Self {
-        ResolveError {
+        Self {
             filename: filename.to_string(),
             resolve_error: None,
         }

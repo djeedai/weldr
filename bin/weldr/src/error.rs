@@ -127,7 +127,7 @@ pub struct Utf8Error {
 
 impl Utf8Error {
     pub fn new(context: &str) -> Self {
-        Utf8Error {
+        Self {
             context: context.to_string(),
         }
     }

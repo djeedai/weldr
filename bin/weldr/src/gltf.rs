@@ -216,8 +216,8 @@ pub struct Mesh {
 }
 
 impl Gltf {
-    pub fn new(asset: Asset) -> Gltf {
-        Gltf {
+    pub fn new(asset: Asset) -> Self {
+        Self {
             asset,
             nodes: vec![],
             scenes: vec![],
@@ -238,8 +238,8 @@ impl Gltf {
 }
 
 impl Asset {
-    pub fn new(version: &str) -> Asset {
-        Asset {
+    pub fn new(version: &str) -> Self {
+        Self {
             version: version.to_string(),
             min_version: None,
             generator: None,
@@ -270,8 +270,8 @@ impl Asset {
 }
 
 impl Buffer {
-    pub fn new(byte_length: u32) -> Buffer {
-        Buffer {
+    pub fn new(byte_length: u32) -> Self {
+        Self {
             name: None,
             byte_length,
             uri: None,
