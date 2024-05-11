@@ -36,3 +36,4 @@ serde_repr = "0.1"
 ordered-float = "2.0"
 log = "0.4"
 atty = "0.2"
+bytemuck = { version = "1", features = ["derive"] }
