@@ -1,6 +1,7 @@
 [package]
 name = "weldr"
-version = "0.4.0"
+version = "0.5.0"
+rust-version = "1.61"
 authors = ["Jerome Humbert"]
 description = "A Rust library to manage LDraw files (.ldr)"
 license = "MIT OR Apache-2.0"

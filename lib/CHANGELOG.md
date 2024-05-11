@@ -1,5 +1,19 @@
 # Change Log
 
+## 0.5.0
+
+### Added
+
+- Added support for multi-part documents (MPD extension).
+
+### Changed
+
+- Bumped minimum rust version (MSRV) to 1.61.
+
+### Fixed
+
+- Fixed a bug in hybrid file parsing, which discarded some drawing commands. (#32)
+
 ## 0.4.0
 
 Project relicensed to a dual license MIT or Apache 2.0. See `LICENSE-APACHE2` and `LICENSE-MIT`.
