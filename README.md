@@ -3,7 +3,7 @@
 [![License: MIT or Apache 2.0](https://img.shields.io/badge/License-MIT%20or%20Apache2-blue.svg)](https://github.com/djeedai/weldr#license)
 [![CI](https://github.com/djeedai/weldr/workflows/CI/badge.svg?branch=main)](https://github.com/djeedai/weldr/actions?query=workflow%3ACI)
 [![Coverage Status](https://coveralls.io/repos/github/djeedai/weldr/badge.svg?branch=main)](https://coveralls.io/github/djeedai/weldr?branch=main)
-![Minimum rustc version](https://img.shields.io/badge/rustc-1.60.0+-lightgray.svg)
+![Minimum rustc version](https://img.shields.io/badge/rustc-1.61.0+-lightgray.svg)
 
 weldr is a Rust library and command-line tool to manipulate [LDraw](https://www.ldraw.org/) files ([format specification](https://www.ldraw.org/article/218.html)), which are files describing 3D models of [LEGO®](http://www.lego.com)* pieces.
 
@@ -21,8 +21,6 @@ The weldr library allows building command-line tools and applications leveraging
 Parse the content of a single LDraw file containing 2 commands:
 
 ```rust
-extern crate weldr;
-
 use weldr::{parse_raw, CommandType, CommentCmd, LineCmd, Vec3};
 
 fn main() {}
