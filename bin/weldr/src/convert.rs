@@ -124,41 +124,38 @@ impl ConvertCommand {
         };
         gltf.nodes.push(node);
 
-        // TODO: Check the part type rather than the extension.
-        if filename.ends_with(".dat") {
-            // Create geometry if the node is a part.
-            let mesh_index = mesh_cache.entry(filename.into()).or_insert_with(|| {
-                let mesh_index = gltf.meshes.len() as u32;
-                let geometry = self.create_geometry(source_file, source_map);
-                // Don't set empty meshes to avoid import errors.
-                if !geometry.vertices.is_empty() && !geometry.triangle_indices.is_empty() {
-                    self.add_mesh(&geometry, gltf, buffer);
-                    Some(mesh_index)
-                } else {
-                    None
-                }
-            });
+        // Create geometry if any for this node
+        let opt_mesh_index = mesh_cache.entry(filename.into()).or_insert_with(|| {
+            let mesh_index = gltf.meshes.len() as u32;
+            let geometry = self.create_geometry(source_file, source_map);
+            // Don't set empty meshes to avoid import errors.
+            if !geometry.vertices.is_empty() && !geometry.triangle_indices.is_empty() {
+                self.add_mesh(&geometry, gltf, buffer);
+                Some(mesh_index)
+            } else {
+                None
+            }
+        });
+        gltf.nodes[node_index].mesh_index = *opt_mesh_index;
 
-            gltf.nodes[node_index].mesh_index = *mesh_index;
-        } else {
-            for cmd in &source_file.cmds {
-                if let Command::SubFileRef(sfr_cmd) = cmd {
-                    if let Some(subfile) = source_map.get(&sfr_cmd.file) {
-                        // Don't apply node transforms to preserve the scene hierarchy.
-                        // Applications should handle combining the transforms.
-                        let transform = sfr_cmd.matrix();
+        // Recursively parse sub-files
+        for cmd in &source_file.cmds {
+            if let Command::SubFileRef(sfr_cmd) = cmd {
+                if let Some(subfile) = source_map.get(&sfr_cmd.file) {
+                    // Don't apply node transforms to preserve the scene hierarchy.
+                    // Applications should handle combining the transforms.
+                    let transform = sfr_cmd.matrix();
 
-                        let child_node_index = self.add_nodes(
-                            &sfr_cmd.file,
-                            subfile,
-                            Some(transform),
-                            source_map,
-                            gltf,
-                            buffer,
-                            mesh_cache,
-                        );
-                        gltf.nodes[node_index].children.push(child_node_index);
-                    }
+                    let child_node_index = self.add_nodes(
+                        &sfr_cmd.file,
+                        subfile,
+                        Some(transform),
+                        source_map,
+                        gltf,
+                        buffer,
+                        mesh_cache,
+                    );
+                    gltf.nodes[node_index].children.push(child_node_index);
                 }
             }
         }

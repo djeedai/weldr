@@ -305,6 +305,7 @@ impl GeometryCache {
     }
 
     fn add_line(&mut self, draw_ctx: &DrawContext, vertices: &[Vec3; 2]) {
+        trace!("LINE: {:?}", vertices);
         let i0 = self.insert_vertex(&vertices[0], &draw_ctx.transform);
         let i1 = self.insert_vertex(&vertices[1], &draw_ctx.transform);
         self.line_indices.push(i0);
@@ -312,6 +313,7 @@ impl GeometryCache {
     }
 
     fn add_triangle(&mut self, draw_ctx: &DrawContext, vertices: &[Vec3; 3]) {
+        trace!("TRI: {:?}", vertices);
         let i0 = self.insert_vertex(&vertices[0], &draw_ctx.transform);
         let i1 = self.insert_vertex(&vertices[1], &draw_ctx.transform);
         let i2 = self.insert_vertex(&vertices[2], &draw_ctx.transform);
@@ -321,8 +323,17 @@ impl GeometryCache {
     }
 
     fn add_quad(&mut self, draw_ctx: &DrawContext, vertices: &[Vec3; 4]) {
-        self.add_triangle(draw_ctx, &[vertices[0], vertices[1], vertices[2]]);
-        self.add_triangle(draw_ctx, &[vertices[0], vertices[2], vertices[3]]);
+        trace!("QUAD: {:?}", vertices);
+        let i0 = self.insert_vertex(&vertices[0], &draw_ctx.transform);
+        let i1 = self.insert_vertex(&vertices[1], &draw_ctx.transform);
+        let i2 = self.insert_vertex(&vertices[2], &draw_ctx.transform);
+        let i3 = self.insert_vertex(&vertices[3], &draw_ctx.transform);
+        self.triangle_indices.push(i0);
+        self.triangle_indices.push(i2);
+        self.triangle_indices.push(i1);
+        self.triangle_indices.push(i0);
+        self.triangle_indices.push(i3);
+        self.triangle_indices.push(i2);
     }
 }
 

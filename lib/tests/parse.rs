@@ -1,5 +1,3 @@
-extern crate weldr;
-
 use weldr::{error::ResolveError, Command, FileRefResolver, SourceFile, SourceMap, SubFileRefCmd};
 
 use std::collections::HashMap;
@@ -67,7 +65,7 @@ fn test_memory_resolver() {
 #[test]
 fn parse_recursive() {
     let mut memory_resolver = MemoryResolver::new();
-    memory_resolver.add("root.ldr", b"1 16 0 0 0 1 0 0 0 1 0 0 0 1 a.ldr\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 b.ldr\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 a.ldr");
+    memory_resolver.add("root.ldr", b"1 16 0 0 0 1 0 0 0 1 0 0 0 1 a.ldr\n4 16 0 0 0 1 1 1 2 2 2 3 3 3\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 b.ldr\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 a.ldr");
     memory_resolver.add("a.ldr", b"4 16 1 1 0 0.9239 1 0.3827 0.9239 0 0.3827 1 0 0");
     memory_resolver.add(
         "b.ldr",
@@ -76,16 +74,18 @@ fn parse_recursive() {
     let mut source_map = weldr::SourceMap::new();
     let root_file_name = weldr::parse("root.ldr", &memory_resolver, &mut source_map).unwrap();
     let root_file = source_map.get(&root_file_name).unwrap();
-    assert_eq!(3, root_file.cmds.len());
+    assert_eq!(4, root_file.cmds.len());
+    // Regression #32: top-level drawing commands work with sub-file references
+    assert!(matches!(root_file.cmds[1], Command::Quad(_)));
 
     let file0 = get_resolved_subfile_ref(&root_file.cmds[0]).unwrap();
     assert_eq!(file0.file, "a.ldr");
     assert_eq!(1, source_map.get(&file0.file).unwrap().cmds.len());
 
-    let file1 = get_resolved_subfile_ref(&root_file.cmds[1]).unwrap();
+    let file1 = get_resolved_subfile_ref(&root_file.cmds[2]).unwrap();
     assert_eq!(2, source_map.get(&file1.file).unwrap().cmds.len());
 
-    let file2 = get_resolved_subfile_ref(&root_file.cmds[2]).unwrap();
+    let file2 = get_resolved_subfile_ref(&root_file.cmds[3]).unwrap();
     assert_eq!(1, source_map.get(&file2.file).unwrap().cmds.len());
     assert_eq!(file0, file2);
 
