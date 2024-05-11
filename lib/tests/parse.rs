@@ -20,8 +20,8 @@ struct MemoryResolver {
 }
 
 impl MemoryResolver {
-    fn new() -> MemoryResolver {
-        MemoryResolver {
+    fn new() -> Self {
+        Self {
             file_map: HashMap::new(),
         }
     }

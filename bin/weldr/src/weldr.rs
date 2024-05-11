@@ -59,8 +59,8 @@ struct SimpleLogger {
 static mut LOGGER: SimpleLogger = SimpleLogger::new();
 
 impl SimpleLogger {
-    const fn new() -> SimpleLogger {
-        SimpleLogger {
+    const fn new() -> Self {
+        Self {
             log_level: log::LevelFilter::Info,
             color_enabled: false,
             emoji_enabled: false,
@@ -183,11 +183,11 @@ struct DiskResolver {
 }
 
 impl DiskResolver {
-    fn new() -> DiskResolver {
-        DiskResolver { base_paths: vec![] }
+    fn new() -> Self {
+        Self { base_paths: vec![] }
     }
 
-    fn new_from_catalog<P: AsRef<Path>>(catalog_path: P) -> Result<DiskResolver, Error> {
+    fn new_from_catalog<P: AsRef<Path>>(catalog_path: P) -> Result<Self, Error> {
         let catalog_path = std::fs::canonicalize(catalog_path)
             .map_err(|e| Error::NotFound(format!("catalog path not found ({})", e)))?;
         let base_paths = vec![
@@ -195,7 +195,7 @@ impl DiskResolver {
             catalog_path.join("parts"),
             catalog_path.join("parts").join("s"),
         ];
-        Ok(DiskResolver { base_paths })
+        Ok(Self { base_paths })
     }
 
     fn add_path<P: AsRef<Path>>(&mut self, path: P) -> Result<(), Error> {
@@ -280,8 +280,8 @@ struct GeometryCache {
 }
 
 impl GeometryCache {
-    fn new() -> GeometryCache {
-        GeometryCache {
+    fn new() -> Self {
+        Self {
             vertices: vec![],
             vertex_map: HashMap::new(),
             line_indices: vec![],
