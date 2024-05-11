@@ -1,5 +1,12 @@
 # Change Log
 
+## 0.4.0
+
+### Changed
+
+- Upgraded to `weldr` v0.5 for MPD support.
+- Bumped minimum rust version (MSRV) to 1.61.
+
 ## 0.3.0
 
 Project relicensed to a dual license MIT or Apache 2.0. See `LICENSE-APACHE2` and `LICENSE-MIT`.
