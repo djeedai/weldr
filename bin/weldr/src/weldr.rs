@@ -337,14 +337,6 @@ impl GeometryCache {
     }
 }
 
-/// Transform a slice of something sized into a slice of u8, for binary writing.
-unsafe fn as_u8_slice<T: Sized>(p: &[T]) -> &[u8] {
-    ::std::slice::from_raw_parts(
-        p.as_ptr() as *const u8,
-        ::std::mem::size_of::<T>() * p.len(),
-    )
-}
-
 #[cfg(not(target_os = "windows"))]
 fn is_tty() -> bool {
     atty::is(atty::Stream::Stderr)
@@ -400,7 +392,7 @@ mod tests {
     fn test_as_u8_slice() {
         assert_eq!(12, std::mem::size_of::<Vec3>());
         let v = vec![Vec3::new(1.0, 2.0, 4.0), Vec3::new(1.0, 2.0, 4.0)];
-        let b: &[u8] = unsafe { as_u8_slice(&v[..]) };
+        let b: &[u8] = bytemuck::cast_slice(&v[..]);
         assert_eq!(24, b.len());
     }
 
